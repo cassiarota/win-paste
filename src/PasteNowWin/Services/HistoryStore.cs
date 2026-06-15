@@ -98,8 +98,40 @@ public sealed class HistoryStore : IDisposable
                 name  TEXT NOT NULL,
                 blob  BLOB NOT NULL,
                 sort  INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS lists (
+                id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                name  TEXT NOT NULL,
+                sort  INTEGER NOT NULL DEFAULT 0
             );";
         cmd.ExecuteNonQuery();
+
+        EnsureItemsListIdColumn();
+    }
+
+    /// <summary>Adds items.list_id to databases created before custom lists existed.</summary>
+    private void EnsureItemsListIdColumn()
+    {
+        bool exists = false;
+        using (SqliteCommand info = _conn.CreateCommand())
+        {
+            info.CommandText = "PRAGMA table_info(items)";
+            using SqliteDataReader reader = info.ExecuteReader();
+            while (reader.Read())
+            {
+                if (reader.GetString(1) == "list_id")
+                {
+                    exists = true;
+                    break;
+                }
+            }
+        }
+        if (!exists)
+        {
+            using SqliteCommand alter = _conn.CreateCommand();
+            alter.CommandText = "ALTER TABLE items ADD COLUMN list_id INTEGER";
+            alter.ExecuteNonQuery();
+        }
     }
 
     /// <summary>
@@ -356,6 +388,67 @@ public sealed class HistoryStore : IDisposable
         cmd.ExecuteNonQuery();
     }
 
+    // ---- Custom lists ----
+    public List<ClipList> GetLists()
+    {
+        var list = new List<ClipList>();
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT id, name FROM lists ORDER BY sort, id";
+        using SqliteDataReader reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new ClipList { Id = reader.GetInt64(0), Name = reader.GetString(1) });
+        }
+        return list;
+    }
+
+    public long AddList(string name)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = @"INSERT INTO lists (name, sort) VALUES ($n,
+            (SELECT COALESCE(MAX(sort), 0) + 1 FROM lists));
+            SELECT last_insert_rowid();";
+        cmd.Parameters.AddWithValue("$n", name);
+        return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    public void RenameList(long id, string name)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "UPDATE lists SET name = $n WHERE id = $id";
+        cmd.Parameters.AddWithValue("$n", name);
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void DeleteList(long id)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "UPDATE items SET list_id = NULL WHERE list_id = $id; DELETE FROM lists WHERE id = $id;";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    public List<ClipboardItem> GetByList(long listId)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT id, type, text, image, preview, source_app, pinned, created_at
+            FROM items WHERE list_id = $id
+            ORDER BY pinned DESC, created_at DESC";
+        cmd.Parameters.AddWithValue("$id", listId);
+        return ReadAll(cmd);
+    }
+
+    public void AssignToList(long itemId, long? listId)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "UPDATE items SET list_id = $l WHERE id = $id";
+        cmd.Parameters.AddWithValue("$l", (object?)listId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$id", itemId);
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>Deletes unpinned items older than <paramref name="days"/>. No-op when days &lt;= 0.</summary>
     public void PurgeExpired(int days)
     {
@@ -375,8 +468,8 @@ public sealed class HistoryStore : IDisposable
         using SqliteCommand cmd = _conn.CreateCommand();
         cmd.CommandText = @"
             DELETE FROM items
-            WHERE pinned = 0 AND id NOT IN (
-                SELECT id FROM items WHERE pinned = 0 ORDER BY created_at DESC LIMIT $keep
+            WHERE pinned = 0 AND list_id IS NULL AND id NOT IN (
+                SELECT id FROM items WHERE pinned = 0 AND list_id IS NULL ORDER BY created_at DESC LIMIT $keep
             )";
         cmd.Parameters.AddWithValue("$keep", GetMaxItems());
         cmd.ExecuteNonQuery();

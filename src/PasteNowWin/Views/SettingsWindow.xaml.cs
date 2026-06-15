@@ -210,6 +210,11 @@ public partial class SettingsWindow : Window
         new SnippetsWindow(_store) { Owner = this }.ShowDialog();
     }
 
+    private void ManageLists_Click(object sender, RoutedEventArgs e)
+    {
+        new ListsWindow(_store) { Owner = this }.ShowDialog();
+    }
+
     // ---- Password protection ----
     private void MasterPw_Click(object sender, RoutedEventArgs e)
     {

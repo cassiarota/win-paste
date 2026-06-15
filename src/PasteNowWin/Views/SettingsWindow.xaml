@@ -33,8 +33,10 @@
             <ComboBoxItem Tag="5000" Content="5000 条" />
         </ComboBox>
 
-        <Button Content="管理常用片段…" Click="ManageSnippets_Click"
-                Padding="10,5" HorizontalAlignment="Left" Margin="0,14,0,0" />
+        <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+            <Button Content="管理常用片段…" Click="ManageSnippets_Click" Padding="10,5" Margin="0,0,10,0" />
+            <Button Content="管理列表…" Click="ManageLists_Click" Padding="10,5" />
+        </StackPanel>
 
         <TextBlock Text="历史过期时间" FontWeight="Bold" Foreground="#222" FontSize="14" Margin="0,16,0,4" />
         <ComboBox x:Name="ExpiryCombo" Width="180" HorizontalAlignment="Left"
