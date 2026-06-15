@@ -10,7 +10,7 @@
     <AssemblyName>PasteNowWin</AssemblyName>
     <RootNamespace>PasteNowWin</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Product>PasteNowWin</Product>
     <!-- WPF-primary app: PerMonitorV2 DPI is intentionally set in app.manifest.
          WinForms (used only for the tray icon) would otherwise warn about it. -->

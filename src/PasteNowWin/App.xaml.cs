@@ -30,6 +30,7 @@ public partial class App : Application
     private HotkeyManager _hotkeys = null!;
 
     private System.Windows.Forms.NotifyIcon _tray = null!;
+    private System.Windows.Forms.ToolStripMenuItem _openMenuItem = null!;
     private System.Windows.Forms.ToolStripMenuItem _startupMenuItem = null!;
     private System.Windows.Forms.ToolStripMenuItem _updateMenuItem = null!;
     private System.Drawing.Icon? _trayIcon;
@@ -166,14 +167,50 @@ public partial class App : Application
         }
     }
 
-    /// <summary>Re-registers both global hotkeys from the saved (or default) combinations.</summary>
-    internal void ReloadHotkeys()
+    /// <summary>
+    /// Re-registers both global hotkeys from the saved (or default) combinations and updates
+    /// the tray label. Returns whether each one registered successfully.
+    /// </summary>
+    internal (bool popupOk, bool plainOk) ReloadHotkeys()
     {
         _hotkeys.UnregisterAll();
         HotkeyCombo popup = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPopupKey), DefaultPopup);
         HotkeyCombo plain = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPlainKey), DefaultPlain);
-        _hotkeys.Register(HotkeyPopup, popup.Modifiers, popup.VirtualKey);
-        _hotkeys.Register(HotkeyPlain, plain.Modifiers, plain.VirtualKey);
+        bool popupOk = _hotkeys.Register(HotkeyPopup, popup.Modifiers, popup.VirtualKey);
+        bool plainOk = _hotkeys.Register(HotkeyPlain, plain.Modifiers, plain.VirtualKey);
+
+        if (_openMenuItem != null)
+        {
+            _openMenuItem.Text = $"打开历史 ({popup.ToDisplayString()})";
+        }
+        return (popupOk, plainOk);
+    }
+
+    /// <summary>Temporarily removes the global hotkeys (so the settings recorder can capture them).</summary>
+    internal void SuspendHotkeys() => _hotkeys.UnregisterAll();
+
+    /// <summary>Re-applies the saved hotkeys after a suspended/cancelled recording.</summary>
+    internal void ResumeHotkeys() => ReloadHotkeys();
+
+    /// <summary>
+    /// Saves a new combo for one hotkey and re-registers. If either hotkey then fails to
+    /// register (e.g. the combo is taken), reverts to the previous value and returns false.
+    /// </summary>
+    internal bool TrySetHotkey(bool isPopup, HotkeyCombo combo)
+    {
+        string key = isPopup ? HistoryStore.HotkeyPopupKey : HistoryStore.HotkeyPlainKey;
+        string previous = _store.GetSetting(key) ?? (isPopup ? DefaultPopup : DefaultPlain).Serialize();
+
+        _store.SetSetting(key, combo.Serialize());
+        (bool popupOk, bool plainOk) = ReloadHotkeys();
+        if (popupOk && plainOk)
+        {
+            return true;
+        }
+
+        _store.SetSetting(key, previous);
+        ReloadHotkeys();
+        return false;
     }
 
     private void OnHotkey(int id)
@@ -215,7 +252,7 @@ public partial class App : Application
     {
         if (_settings == null)
         {
-            _settings = new SettingsWindow(_store, ReloadHotkeys);
+            _settings = new SettingsWindow(_store, this);
             _settings.Closed += (_, _) => _settings = null;
             _settings.Show();
         }
@@ -245,7 +282,12 @@ public partial class App : Application
         };
 
         var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("打开历史 (Ctrl+Shift+V)", null, (_, _) => ShowPopup());
+
+        HotkeyCombo popupCombo = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPopupKey), DefaultPopup);
+        _openMenuItem = new System.Windows.Forms.ToolStripMenuItem(
+            $"打开历史 ({popupCombo.ToDisplayString()})", null, (_, _) => ShowPopup());
+        menu.Items.Add(_openMenuItem);
+
         menu.Items.Add("设置…", null, (_, _) => ShowSettings());
 
         _startupMenuItem = new System.Windows.Forms.ToolStripMenuItem("开机自启")

@@ -14,18 +14,18 @@ public partial class SettingsWindow : Window
     private static readonly HotkeyCombo DefaultPlain = new(NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, 0x42);
 
     private readonly HistoryStore _store;
-    private readonly Action _reloadHotkeys;
+    private readonly App _app;
     private bool _initializing;
 
     /// <summary>"popup" / "plain" while capturing a new combo for that hotkey; null otherwise.</summary>
     private string? _recordingTarget;
 
-    public SettingsWindow(HistoryStore store, Action reloadHotkeys)
+    public SettingsWindow(HistoryStore store, App app)
     {
         _initializing = true;
         InitializeComponent();
         _store = store;
-        _reloadHotkeys = reloadHotkeys;
+        _app = app;
 
         string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.1.0";
         VersionText.Text = $"版本 {version}";
@@ -38,6 +38,15 @@ public partial class SettingsWindow : Window
         _initializing = false;
 
         PreviewKeyDown += OnPreviewKeyDown;
+        Closed += (_, _) =>
+        {
+            // If the window is closed mid-recording, make sure the hotkeys come back.
+            if (_recordingTarget != null)
+            {
+                _recordingTarget = null;
+                _app.ResumeHotkeys();
+            }
+        };
     }
 
     private void RefreshCount() => CountText.Text = $"已保存 {_store.Count()} 条历史记录";
@@ -59,9 +68,11 @@ public partial class SettingsWindow : Window
 
     private void StartRecording(string target)
     {
+        LoadHotkeyDisplay(); // clear any stale "按下快捷键…" on the other button
         _recordingTarget = target;
-        Button button = target == "popup" ? PopupHotkeyButton : PlainHotkeyButton;
-        button.Content = "按下快捷键…";
+        // Suspend global hotkeys so their own combos reach this window and can be re-recorded.
+        _app.SuspendHotkeys();
+        (target == "popup" ? PopupHotkeyButton : PlainHotkeyButton).Content = "按下快捷键…";
     }
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
@@ -77,6 +88,7 @@ public partial class SettingsWindow : Window
         if (key == Key.Escape)
         {
             _recordingTarget = null;
+            _app.ResumeHotkeys();
             LoadHotkeyDisplay();
             return;
         }
@@ -97,21 +109,27 @@ public partial class SettingsWindow : Window
             return; // require at least one modifier; keep waiting
         }
 
-        var combo = new HotkeyCombo(mods, (uint)KeyInterop.VirtualKeyFromKey(key));
-        string storeKey = _recordingTarget == "popup" ? HistoryStore.HotkeyPopupKey : HistoryStore.HotkeyPlainKey;
-        _store.SetSetting(storeKey, combo.Serialize());
-
+        bool isPopup = _recordingTarget == "popup";
         _recordingTarget = null;
+
+        var combo = new HotkeyCombo(mods, (uint)KeyInterop.VirtualKeyFromKey(key));
+        bool ok = _app.TrySetHotkey(isPopup, combo);
         LoadHotkeyDisplay();
-        _reloadHotkeys();
+
+        if (!ok)
+        {
+            MessageBox.Show(
+                "该组合键无法注册,可能已被其它程序占用,或与另一个快捷键冲突,请换一个。",
+                "PasteNowWin", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void LoadHotkeyDisplay()
     {
         HotkeyCombo popup = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPopupKey), DefaultPopup);
         HotkeyCombo plain = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPlainKey), DefaultPlain);
-        PopupHotkeyButton.Content = FormatCombo(popup);
-        PlainHotkeyButton.Content = FormatCombo(plain);
+        PopupHotkeyButton.Content = popup.ToDisplayString();
+        PlainHotkeyButton.Content = plain.ToDisplayString();
     }
 
     private static bool IsModifierKey(Key key) => key is
@@ -120,27 +138,6 @@ public partial class SettingsWindow : Window
         Key.LeftAlt or Key.RightAlt or
         Key.LWin or Key.RWin or
         Key.System;
-
-    private static string FormatCombo(HotkeyCombo c)
-    {
-        var parts = new System.Collections.Generic.List<string>(4);
-        if ((c.Modifiers & NativeMethods.MOD_CONTROL) != 0) parts.Add("Ctrl");
-        if ((c.Modifiers & NativeMethods.MOD_SHIFT) != 0) parts.Add("Shift");
-        if ((c.Modifiers & NativeMethods.MOD_ALT) != 0) parts.Add("Alt");
-        if ((c.Modifiers & NativeMethods.MOD_WIN) != 0) parts.Add("Win");
-        parts.Add(KeyName(c.VirtualKey));
-        return string.Join(" + ", parts);
-    }
-
-    private static string KeyName(uint vk)
-    {
-        string s = KeyInterop.KeyFromVirtualKey((int)vk).ToString();
-        if (s.Length == 2 && s[0] == 'D' && char.IsDigit(s[1]))
-        {
-            return s[1].ToString(); // D1 -> 1
-        }
-        return s;
-    }
 
     // ---- Expiry ----
     private void LoadExpirySelection()
