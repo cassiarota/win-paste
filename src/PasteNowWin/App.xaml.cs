@@ -18,6 +18,9 @@ public partial class App : Application
     private const uint VkV = 0x56;
     private const uint VkB = 0x42;
 
+    private static readonly HotkeyCombo DefaultPopup = new(NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, VkV);
+    private static readonly HotkeyCombo DefaultPlain = new(NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, VkB);
+
     private Mutex? _singleInstance;
 
     private HistoryStore _store = null!;
@@ -68,8 +71,7 @@ public partial class App : Application
 
         _hotkeys = new HotkeyManager(_msg);
         _hotkeys.HotkeyPressed += OnHotkey;
-        _hotkeys.Register(HotkeyPopup, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, VkV);
-        _hotkeys.Register(HotkeyPlain, NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, VkB);
+        ReloadHotkeys();
 
         SetupTray();
 
@@ -152,10 +154,26 @@ public partial class App : Application
     private void OnItemCaptured(ClipboardItem item)
     {
         _store.Add(item);
+
+        if (_store.GetSetting(HistoryStore.SoundEnabledKey) == "1")
+        {
+            System.Media.SystemSounds.Asterisk.Play();
+        }
+
         if (_popup is { IsVisible: true })
         {
             _popup.LoadItems();
         }
+    }
+
+    /// <summary>Re-registers both global hotkeys from the saved (or default) combinations.</summary>
+    internal void ReloadHotkeys()
+    {
+        _hotkeys.UnregisterAll();
+        HotkeyCombo popup = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPopupKey), DefaultPopup);
+        HotkeyCombo plain = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPlainKey), DefaultPlain);
+        _hotkeys.Register(HotkeyPopup, popup.Modifiers, popup.VirtualKey);
+        _hotkeys.Register(HotkeyPlain, plain.Modifiers, plain.VirtualKey);
     }
 
     private void OnHotkey(int id)
@@ -197,7 +215,7 @@ public partial class App : Application
     {
         if (_settings == null)
         {
-            _settings = new SettingsWindow(_store);
+            _settings = new SettingsWindow(_store, ReloadHotkeys);
             _settings.Closed += (_, _) => _settings = null;
             _settings.Show();
         }

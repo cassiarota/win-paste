@@ -30,6 +30,16 @@ public sealed class HotkeyManager : IDisposable
         return ok;
     }
 
+    /// <summary>Unregisters every hotkey (used before re-registering custom combinations).</summary>
+    public void UnregisterAll()
+    {
+        foreach (int id in _registered)
+        {
+            NativeMethods.UnregisterHotKey(_msg.Handle, id);
+        }
+        _registered.Clear();
+    }
+
     private void OnMessage(int msg, IntPtr wParam, IntPtr lParam)
     {
         if (msg == NativeMethods.WM_HOTKEY)

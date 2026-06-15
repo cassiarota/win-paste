@@ -1,8 +1,8 @@
 name: build-and-release
 
-# Builds a self-contained Windows x64 executable + an Inno Setup installer.
-#  - Push to main / manual run  -> uploads downloadable build artifacts
-#  - Push a tag like v0.2.0      -> also publishes a GitHub Release (zip + Setup.exe)
+# Builds a self-contained Windows x64 exe + an Inno Setup installer, then:
+#  - Push to main / manual run -> deploys the latest build to the VPS (overwrites; keeps only latest)
+#  - Push a tag like v0.4.0     -> also publishes a GitHub Release (versioned zip + Setup.exe)
 on:
   push:
     branches: [main]
@@ -31,7 +31,9 @@ jobs:
           if ("${{ github.ref }}" -like 'refs/tags/*') {
             $v = "${{ github.ref_name }}".TrimStart('v')
           } else {
-            $v = "0.0.0"
+            $xml = [xml](Get-Content src/PasteNowWin/PasteNowWin.csproj)
+            $v = ($xml.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1)
+            if (-not $v) { $v = '0.0.0' }
           }
           "VER=$v" >> $env:GITHUB_ENV
           Write-Host "version = $v"
@@ -61,13 +63,20 @@ jobs:
           Compress-Archive -Path publish/* -DestinationPath $zip -Force
           "ZIP=$zip" >> $env:GITHUB_ENV
 
-      - name: Upload build artifacts
+      - name: Stage VPS dist (fixed names + version + site)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "installer/output/PasteNowWin-${env:VER}-Setup.exe" "dist/PasteNowWin-Setup.exe"
+          Copy-Item "${env:ZIP}" "dist/PasteNowWin-win-x64.zip"
+          "${env:VER}" | Out-File -Encoding ascii -NoNewline dist/version.txt
+          Copy-Item site/index.html dist/index.html
+
+      - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PasteNowWin-win-x64
-          path: |
-            ${{ env.ZIP }}
-            installer/output/PasteNowWin-${{ env.VER }}-Setup.exe
+          name: vps-dist
+          path: dist
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -81,3 +90,34 @@ jobs:
             "installer/output/PasteNowWin-${env:VER}-Setup.exe" `
             --title "PasteNowWin ${{ github.ref_name }}" `
             --generate-notes
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vps-dist
+          path: dist
+
+      - name: Deploy to VPS (overwrite latest only)
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_DIR: ${{ secrets.VPS_DEPLOY_DIR }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          OPTS="-i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=20"
+          ssh $OPTS "$VPS_USER@$VPS_HOST" "mkdir -p '$VPS_DIR/download'"
+          scp $OPTS dist/PasteNowWin-Setup.exe   "$VPS_USER@$VPS_HOST:$VPS_DIR/download/PasteNowWin-Setup.exe"
+          scp $OPTS dist/PasteNowWin-win-x64.zip "$VPS_USER@$VPS_HOST:$VPS_DIR/download/PasteNowWin-win-x64.zip"
+          scp $OPTS dist/version.txt             "$VPS_USER@$VPS_HOST:$VPS_DIR/download/version.txt"
+          scp $OPTS dist/index.html              "$VPS_USER@$VPS_HOST:$VPS_DIR/index.html"
+          rm -f ~/.ssh/deploy_key
+          echo "Deployed version $(cat dist/version.txt) to $VPS_HOST"

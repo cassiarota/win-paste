@@ -23,6 +23,15 @@ public sealed class HistoryStore : IDisposable
     /// <summary>Settings key: newline-separated process names whose copies are not recorded.</summary>
     public const string ExclusionsKey = "exclusions";
 
+    /// <summary>Settings key: history-popup hotkey, serialized as "modifiers:vk".</summary>
+    public const string HotkeyPopupKey = "hotkey_popup";
+
+    /// <summary>Settings key: paste-recent-as-plain-text hotkey, serialized as "modifiers:vk".</summary>
+    public const string HotkeyPlainKey = "hotkey_plain";
+
+    /// <summary>Settings key: "1" to play a sound when a new clipboard item is captured.</summary>
+    public const string SoundEnabledKey = "sound_enabled";
+
     private readonly SqliteConnection _conn;
 
     public HistoryStore()
