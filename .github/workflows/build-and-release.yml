@@ -1,8 +1,8 @@
 name: build-and-release
 
-# Builds a self-contained Windows x64 executable.
-#  - Push to main / manual run  -> uploads a downloadable build artifact
-#  - Push a tag like v0.1.0      -> also publishes a GitHub Release with the zip
+# Builds a self-contained Windows x64 executable + an Inno Setup installer.
+#  - Push to main / manual run  -> uploads downloadable build artifacts
+#  - Push a tag like v0.2.0      -> also publishes a GitHub Release (zip + Setup.exe)
 on:
   push:
     branches: [main]
@@ -25,6 +25,17 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Compute version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref }}" -like 'refs/tags/*') {
+            $v = "${{ github.ref_name }}".TrimStart('v')
+          } else {
+            $v = "0.0.0"
+          }
+          "VER=$v" >> $env:GITHUB_ENV
+          Write-Host "version = $v"
+
       - name: Restore
         run: dotnet restore src/PasteNowWin/PasteNowWin.csproj
 
@@ -37,18 +48,26 @@ jobs:
           -p:DebugType=none
           -o publish
 
-      - name: Package zip
+      - name: Build installer (Inno Setup)
         shell: pwsh
         run: |
-          $name = "PasteNowWin-${{ github.ref_name }}-win-x64.zip"
-          Compress-Archive -Path publish/* -DestinationPath $name -Force
-          echo "ASSET=$name" >> $env:GITHUB_ENV
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${env:VER}" installer/PasteNowWin.iss
 
-      - name: Upload build artifact
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $zip = "PasteNowWin-${env:VER}-win-x64.zip"
+          Compress-Archive -Path publish/* -DestinationPath $zip -Force
+          "ZIP=$zip" >> $env:GITHUB_ENV
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: PasteNowWin-win-x64
-          path: ${{ env.ASSET }}
+          path: |
+            ${{ env.ZIP }}
+            installer/output/PasteNowWin-${{ env.VER }}-Setup.exe
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -57,6 +76,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" "${{ env.ASSET }}" `
+          gh release create "${{ github.ref_name }}" `
+            "${env:ZIP}" `
+            "installer/output/PasteNowWin-${env:VER}-Setup.exe" `
             --title "PasteNowWin ${{ github.ref_name }}" `
             --generate-notes

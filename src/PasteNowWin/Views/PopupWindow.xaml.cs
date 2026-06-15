@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using PasteNowWin.Models;
 using PasteNowWin.Services;
 
@@ -14,6 +15,7 @@ public partial class PopupWindow : Window
     private readonly HistoryStore _store;
     private readonly Action<ClipboardItem, bool> _onPaste;
     private List<PopupItemVm> _all = new();
+    private bool _contextMenuOpen;
 
     public PopupWindow(HistoryStore store, Action<ClipboardItem, bool> onPaste)
     {
@@ -21,8 +23,15 @@ public partial class PopupWindow : Window
         _store = store;
         _onPaste = onPaste;
 
-        // Close when the user clicks away (matches PasteNow behaviour).
-        Deactivated += (_, _) => Hide();
+        // Close when the user clicks away (matches PasteNow behaviour),
+        // but keep open while the right-click context menu is showing.
+        Deactivated += (_, _) =>
+        {
+            if (!_contextMenuOpen)
+            {
+                Hide();
+            }
+        };
         PreviewKeyDown += OnPreviewKeyDown;
     }
 
@@ -39,12 +48,20 @@ public partial class PopupWindow : Window
         SearchBox.Focus();
     }
 
-    /// <summary>Centers the popup on the primary screen's working area (in DIPs).</summary>
-    public void CenterOnScreen()
+    /// <summary>Shows the popup on the monitor under the cursor, then focuses the search box.</summary>
+    public void ShowAtCursor()
     {
-        Rect wa = SystemParameters.WorkArea;
-        Left = wa.Left + (wa.Width - Width) / 2;
-        Top = wa.Top + (wa.Height - Height) / 2;
+        // Park off-screen first so the initial frame never flashes at the old location,
+        // then place precisely (in physical pixels) via Win32 once the HWND exists.
+        Left = -32000;
+        Top = -32000;
+        Show();
+
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
+        Interop.NativeMethods.PositionWindowAtCursor(hwnd, Width, Height);
+
+        Activate();
+        FocusSearch();
     }
 
     private void ApplyFilter(string query)
@@ -147,4 +164,25 @@ public partial class PopupWindow : Window
             }
         }
     }
+
+    // ---- Right-click context menu ----
+    private void ListBoxItem_RightDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is ListBoxItem item)
+        {
+            item.IsSelected = true;
+        }
+    }
+
+    private void ItemMenu_Opened(object sender, RoutedEventArgs e) => _contextMenuOpen = true;
+
+    private void ItemMenu_Closed(object sender, RoutedEventArgs e) => _contextMenuOpen = false;
+
+    private void MenuPaste_Click(object sender, RoutedEventArgs e) => PasteSelected(plainText: false);
+
+    private void MenuPastePlain_Click(object sender, RoutedEventArgs e) => PasteSelected(plainText: true);
+
+    private void MenuPin_Click(object sender, RoutedEventArgs e) => PinSelected();
+
+    private void MenuDelete_Click(object sender, RoutedEventArgs e) => DeleteSelected();
 }

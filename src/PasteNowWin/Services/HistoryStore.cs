@@ -17,6 +17,9 @@ public sealed class HistoryStore : IDisposable
 {
     private const int MaxUnpinnedItems = 1000;
 
+    /// <summary>Settings key: number of days before unpinned items expire (0 = never).</summary>
+    public const string ExpiryDaysKey = "expiry_days";
+
     private readonly SqliteConnection _conn;
 
     public HistoryStore()
@@ -49,7 +52,11 @@ public sealed class HistoryStore : IDisposable
                 created_at   TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_items_order ON items(pinned DESC, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_items_hash ON items(content_hash);";
+            CREATE INDEX IF NOT EXISTS idx_items_hash ON items(content_hash);
+            CREATE TABLE IF NOT EXISTS meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            );";
         cmd.ExecuteNonQuery();
     }
 
@@ -174,6 +181,38 @@ public sealed class HistoryStore : IDisposable
         using SqliteCommand cmd = _conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM items";
         return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    public string? GetSetting(string key)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT value FROM meta WHERE key = $k LIMIT 1";
+        cmd.Parameters.AddWithValue("$k", key);
+        object? value = cmd.ExecuteScalar();
+        return value == null || value == DBNull.Value ? null : (string)value;
+    }
+
+    public void SetSetting(string key, string value)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "INSERT OR REPLACE INTO meta (key, value) VALUES ($k, $v)";
+        cmd.Parameters.AddWithValue("$k", key);
+        cmd.Parameters.AddWithValue("$v", value);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Deletes unpinned items older than <paramref name="days"/>. No-op when days &lt;= 0.</summary>
+    public void PurgeExpired(int days)
+    {
+        if (days <= 0)
+        {
+            return;
+        }
+
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM items WHERE pinned = 0 AND created_at < $cutoff";
+        cmd.Parameters.AddWithValue("$cutoff", ToIso(DateTime.UtcNow.AddDays(-days)));
+        cmd.ExecuteNonQuery();
     }
 
     private void TrimOverflow()

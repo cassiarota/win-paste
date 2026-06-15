@@ -28,6 +28,8 @@ public partial class App : Application
     private System.Windows.Forms.ToolStripMenuItem _startupMenuItem = null!;
     private System.Drawing.Icon? _trayIcon;
 
+    private System.Windows.Threading.DispatcherTimer? _purgeTimer;
+
     private PopupWindow? _popup;
     private SettingsWindow? _settings;
     private IntPtr _lastForeground;
@@ -45,6 +47,11 @@ public partial class App : Application
         }
 
         _store = new HistoryStore();
+        PurgeExpiredNow();
+        _purgeTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromHours(1) };
+        _purgeTimer.Tick += (_, _) => PurgeExpiredNow();
+        _purgeTimer.Start();
+
         _msg = new NativeMessageWindow();
 
         _monitor = new ClipboardMonitor(_msg);
@@ -82,6 +89,12 @@ public partial class App : Application
         }
     }
 
+    private void PurgeExpiredNow()
+    {
+        int days = int.TryParse(_store.GetSetting(HistoryStore.ExpiryDaysKey), out int d) ? d : 0;
+        _store.PurgeExpired(days);
+    }
+
     private void ShowPopup()
     {
         // Remember the window we'll paste back into, before our popup steals focus.
@@ -89,10 +102,7 @@ public partial class App : Application
 
         _popup ??= new PopupWindow(_store, OnPasteRequested);
         _popup.LoadItems();
-        _popup.CenterOnScreen();
-        _popup.Show();
-        _popup.Activate();
-        _popup.FocusSearch();
+        _popup.ShowAtCursor();
     }
 
     private void OnPasteRequested(ClipboardItem item, bool plainText)
@@ -147,6 +157,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _purgeTimer?.Stop();
         _hotkeys?.Dispose();
         _monitor?.Dispose();
         _msg?.Dispose();

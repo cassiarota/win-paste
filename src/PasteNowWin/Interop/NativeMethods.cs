@@ -177,4 +177,94 @@ internal static class NativeMethods
             AttachThreadInput(fgThread, cur, false);
         }
     }
+
+    // ---- Multi-monitor positioning (per-monitor DPI aware) ----
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int left;
+        public int top;
+        public int right;
+        public int bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [DllImport("shcore.dll")]
+    private static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+    private const int MDT_EFFECTIVE_DPI = 0;
+    private const uint SWP_SHOWWINDOW = 0x0040;
+    private static readonly IntPtr HWND_TOPMOST = new(-1);
+
+    /// <summary>
+    /// Moves/sizes the window onto the monitor under the mouse cursor,
+    /// just below the cursor, clamped to that monitor's work area. Sizes the window in
+    /// physical pixels using the target monitor's DPI so it renders correctly on mixed-DPI setups.
+    /// </summary>
+    public static void PositionWindowAtCursor(IntPtr hwnd, double dipWidth, double dipHeight)
+    {
+        if (hwnd == IntPtr.Zero || !GetCursorPos(out POINT cursor))
+        {
+            return;
+        }
+
+        IntPtr monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfo(monitor, ref info))
+        {
+            return;
+        }
+
+        uint dpiX = 96, dpiY = 96;
+        try
+        {
+            GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, out dpiX, out dpiY);
+        }
+        catch
+        {
+            dpiX = dpiY = 96;
+        }
+        if (dpiX == 0) dpiX = 96;
+        if (dpiY == 0) dpiY = 96;
+
+        int physW = (int)Math.Round(dipWidth * dpiX / 96.0);
+        int physH = (int)Math.Round(dipHeight * dpiY / 96.0);
+        int margin = (int)Math.Round(8 * dpiY / 96.0);
+
+        RECT work = info.rcWork;
+        int x = cursor.X - physW / 2;
+        int y = cursor.Y + margin;
+        x = Math.Clamp(x, work.left, Math.Max(work.left, work.right - physW));
+        y = Math.Clamp(y, work.top, Math.Max(work.top, work.bottom - physH));
+
+        SetWindowPos(hwnd, HWND_TOPMOST, x, y, physW, physH, SWP_SHOWWINDOW);
+    }
 }

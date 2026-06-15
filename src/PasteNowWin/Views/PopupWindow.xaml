@@ -10,6 +10,16 @@
         TextOptions.TextFormattingMode="Display"
         UseLayoutRounding="True">
 
+    <Window.Resources>
+        <ContextMenu x:Key="ItemMenu" Opened="ItemMenu_Opened" Closed="ItemMenu_Closed">
+            <MenuItem Header="粘贴" Click="MenuPaste_Click" />
+            <MenuItem Header="以纯文本粘贴" Click="MenuPastePlain_Click" />
+            <Separator />
+            <MenuItem Header="置顶 / 取消置顶" Click="MenuPin_Click" />
+            <MenuItem Header="删除" Click="MenuDelete_Click" />
+        </ContextMenu>
+    </Window.Resources>
+
     <Border CornerRadius="14" Background="#F4F4F6" BorderBrush="#22000000" BorderThickness="1">
         <Border.Effect>
             <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.28" Color="#000000" />
@@ -43,6 +53,8 @@
                     <Style TargetType="ListBoxItem">
                         <Setter Property="Margin" Value="0,2" />
                         <Setter Property="Padding" Value="0" />
+                        <Setter Property="ContextMenu" Value="{StaticResource ItemMenu}" />
+                        <EventSetter Event="PreviewMouseRightButtonDown" Handler="ListBoxItem_RightDown" />
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="ListBoxItem">
@@ -98,7 +110,7 @@
 
             <TextBlock Grid.Row="2" Foreground="#9A9A9A" FontSize="11" Margin="4,8,4,2"
                        TextWrapping="Wrap"
-                       Text="↑↓ 选择 · Enter 粘贴 · Ctrl+Enter 纯文本 · Ctrl+P 置顶 · Delete 删除 · Esc 关闭" />
+                       Text="↑↓ 选择 · Enter 粘贴 · Ctrl+Enter 纯文本 · 右键更多操作 · Esc 关闭" />
         </Grid>
     </Border>
 </Window>
