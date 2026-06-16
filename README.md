@@ -13,7 +13,7 @@
 
 ## 下载与安装
 
-到 [**Releases**](https://github.com/cassiarota/win-paste/releases) 或 **官网**(Cassian Engines 门户首页点
+到 [**Releases**](https://github.com/cassiarota/fine-clipboard/releases) 或 **官网**(Cassian Engines 门户首页点
 **FineClipboard** 卡片进入)下载。
 
 ### Windows

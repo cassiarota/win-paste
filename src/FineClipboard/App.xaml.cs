@@ -145,16 +145,21 @@ public partial class App : Application
 
     private async Task CheckForUpdatesAsync(bool silent)
     {
-        UpdateInfo? info = await _update.CheckAsync();
-        if (info != null)
+        UpdateCheckResult result = await _update.CheckAsync();
+        switch (result.Status)
         {
-            _updateUrl = info.Url;
-            _updateMenuItem.Text = $"⬇ 下载新版本 {info.Version}";
-            ShowBalloon("FineClipboard 有新版本", $"{info.Version} 可用,点击下载更新。");
-        }
-        else if (!silent)
-        {
-            ShowBalloon("FineClipboard", "当前已是最新版本。");
+            case UpdateStatus.UpdateAvailable:
+                UpdateInfo info = result.Update!;
+                _updateUrl = info.Url;
+                _updateMenuItem.Text = $"⬇ 下载新版本 {info.Version}";
+                ShowBalloon("FineClipboard 有新版本", $"{info.Version} 可用,点击下载更新。");
+                break;
+            case UpdateStatus.UpToDate:
+                if (!silent) ShowBalloon("FineClipboard", "当前已是最新版本。");
+                break;
+            case UpdateStatus.Failed:
+                if (!silent) ShowBalloon("FineClipboard", "检查更新失败,请检查网络后重试。");
+                break;
         }
     }
 

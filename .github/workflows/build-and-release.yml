@@ -47,6 +47,7 @@ jobs:
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:DebugType=none
+          -p:Version=${{ env.VER }}
           -o publish
 
       - name: Build installer (Inno Setup)
@@ -134,10 +135,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VER="${GITHUB_REF_NAME#v}"
+          # Attach BOTH versioned assets (stable per-version links) and fixed-name assets.
+          # The fixed names power GitHub's permanent "latest" URLs, e.g.
+          #   https://github.com/<repo>/releases/latest/download/FineClipboard-Setup.exe
+          # which always resolve to the newest release — the website links to these.
           gh release create "${GITHUB_REF_NAME}" \
             "dist-win/FineClipboard-${VER}-Setup.exe" \
             "dist-win/FineClipboard-${VER}-win-x64.zip" \
             "dist-mac/FineClipboard-${VER}-mac.zip" \
+            "dist-win/FineClipboard-Setup.exe" \
+            "dist-win/FineClipboard-win-x64.zip" \
+            "dist-mac/FineClipboard-mac.zip" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "FineClipboard ${GITHUB_REF_NAME}" \
             --generate-notes

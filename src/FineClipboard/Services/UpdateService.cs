@@ -6,21 +6,35 @@ using System.Threading.Tasks;
 
 namespace FineClipboard.Services;
 
-/// <summary>Result of an update check.</summary>
+/// <summary>Details of an available update.</summary>
 public sealed record UpdateInfo(string Version, string Url);
 
+/// <summary>Outcome of an update check, distinguishing a real failure from "already current".</summary>
+public enum UpdateStatus { UpToDate, UpdateAvailable, Failed }
+
+/// <summary>Result of an update check: the status plus, when available, the new version's info.</summary>
+public sealed record UpdateCheckResult(UpdateStatus Status, UpdateInfo? Update)
+{
+    public static readonly UpdateCheckResult UpToDate = new(UpdateStatus.UpToDate, null);
+    public static readonly UpdateCheckResult Failed = new(UpdateStatus.Failed, null);
+    public static UpdateCheckResult Available(UpdateInfo info) => new(UpdateStatus.UpdateAvailable, info);
+}
+
 /// <summary>
-/// Checks the GitHub Releases API for a newer version. No token is used (the repo must be
-/// public for this to return results); failures are swallowed and treated as "no update".
+/// Checks the GitHub Releases API for a newer version. No token is used, so the repo must be
+/// public for this to return results. A network/API/parse failure returns <see cref="UpdateStatus.Failed"/>
+/// (NOT "up to date"), so callers never tell the user they're current when the check never ran.
 /// </summary>
 public sealed class UpdateService
 {
     private const string LatestReleaseApi =
-        "https://api.github.com/repos/cassiarota/win-paste/releases/latest";
+        "https://api.github.com/repos/cassiarota/fine-clipboard/releases/latest";
+    private const string LatestReleasePage =
+        "https://github.com/cassiarota/fine-clipboard/releases/latest";
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
-    public async Task<UpdateInfo?> CheckAsync()
+    public async Task<UpdateCheckResult> CheckAsync()
     {
         try
         {
@@ -31,7 +45,7 @@ public sealed class UpdateService
             using HttpResponseMessage response = await Http.SendAsync(request).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                return null;
+                return UpdateCheckResult.Failed;
             }
 
             string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
@@ -41,17 +55,22 @@ public sealed class UpdateService
             string url = doc.RootElement.TryGetProperty("html_url", out JsonElement u) ? u.GetString() ?? "" : "";
 
             Version? latest = ParseVersion(tag);
-            Version current = Normalize(Assembly.GetExecutingAssembly().GetName().Version);
-
-            if (latest != null && latest > current && !string.IsNullOrEmpty(url))
+            if (latest == null)
             {
-                return new UpdateInfo(tag, url);
+                return UpdateCheckResult.Failed; // couldn't read the release version
             }
-            return null;
+
+            Version current = Normalize(Assembly.GetExecutingAssembly().GetName().Version);
+            if (latest > current)
+            {
+                string download = string.IsNullOrEmpty(url) ? LatestReleasePage : url;
+                return UpdateCheckResult.Available(new UpdateInfo(tag, download));
+            }
+            return UpdateCheckResult.UpToDate;
         }
         catch
         {
-            return null;
+            return UpdateCheckResult.Failed;
         }
     }
 

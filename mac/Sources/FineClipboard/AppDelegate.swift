@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         reloadHotkeys()
         setupStatusItem()
         showFirstRun()
-        Updater.check { [weak self] update in self?.applyUpdate(update, silent: true) }
+        Updater.check { [weak self] result in self?.applyUpdate(result, silent: true) }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -394,16 +394,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
 
     @objc private func checkUpdateAction() {
         if let url = updateURL, let u = URL(string: url) { NSWorkspace.shared.open(u); return }
-        Updater.check { [weak self] update in self?.applyUpdate(update, silent: false) }
+        Updater.check { [weak self] result in self?.applyUpdate(result, silent: false) }
     }
 
-    private func applyUpdate(_ update: Updater.Update?, silent: Bool) {
-        if let update {
+    private func applyUpdate(_ result: Updater.CheckResult, silent: Bool) {
+        switch result {
+        case .available(let update):
             updateURL = update.url
             updateItem.title = "⬇ 下载新版本 \(update.version)"
             if !silent { Prompt.info("有新版本 \(update.version)", "点击菜单栏的「下载新版本」即可打开下载页。") }
-        } else if !silent {
-            Prompt.info("当前已是最新版本")
+        case .upToDate:
+            if !silent { Prompt.info("当前已是最新版本") }
+        case .failed:
+            if !silent { Prompt.info("检查更新失败", "请检查网络后重试。") }
         }
     }
 

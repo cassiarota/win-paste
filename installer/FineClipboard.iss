@@ -9,7 +9,7 @@
 #define MyAppName "FineClipboard"
 #define MyAppExe "FineClipboard.exe"
 #define MyAppPublisher "cassiarota"
-#define MyAppUrl "https://github.com/cassiarota/win-paste"
+#define MyAppUrl "https://github.com/cassiarota/fine-clipboard"
 
 [Setup]
 AppId={{B6E2F0A7-6C3D-4F1E-9E2A-7A1C4D5E6F70}
