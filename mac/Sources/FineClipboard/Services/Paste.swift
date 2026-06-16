@@ -9,12 +9,20 @@ enum Paste {
         pb.setString(s, forType: .string)
     }
 
-    static func writeItem(_ item: ClipItem) {
+    static func writeItem(_ item: ClipItem, plain: Bool = false) {
         let pb = NSPasteboard.general
         pb.clearContents()
         switch item.kind {
         case .text:
-            pb.setString(item.text ?? "", forType: .string)
+            if !plain && item.hasRichText {
+                // Keep formatting: declare plain + HTML + RTF so the target app picks its best.
+                pb.declareTypes([.string, .html, .rtf], owner: nil)
+                pb.setString(item.text ?? "", forType: .string)
+                if let html = item.html { pb.setString(html, forType: .html) }
+                if let rtf = item.rtf, let data = rtf.data(using: .utf8) { pb.setData(data, forType: .rtf) }
+            } else {
+                pb.setString(item.text ?? "", forType: .string)
+            }
         case .files:
             let urls = (item.text ?? "").split(separator: "\n").map { URL(fileURLWithPath: String($0)) }
             if !urls.isEmpty { pb.writeObjects(urls as [NSURL]) }

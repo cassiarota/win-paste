@@ -30,6 +30,12 @@ public sealed class HistoryStore : IDisposable
     /// <summary>Settings key: paste-recent-as-plain-text hotkey, serialized as "modifiers:vk".</summary>
     public const string HotkeyPlainKey = "hotkey_plain";
 
+    /// <summary>Settings key: paste-next-from-stack hotkey, serialized as "modifiers:vk".</summary>
+    public const string HotkeyStackKey = "hotkey_stack";
+
+    /// <summary>Settings key: screenshot (region capture) hotkey, serialized as "modifiers:vk".</summary>
+    public const string HotkeyShotKey = "hotkey_shot";
+
     /// <summary>Settings key: "1" to play a sound when a new clipboard item is captured.</summary>
     public const string SoundEnabledKey = "sound_enabled";
 
@@ -59,6 +65,16 @@ public sealed class HistoryStore : IDisposable
 
     /// <summary>Settings key: "1" once history content has been encrypted.</summary>
     public const string EncVersionKey = "enc_version";
+
+    /// <summary>Sync settings: base URL, account email, bearer token, pull cursor, enabled flag.</summary>
+    public const string SyncBaseUrlKey = "sync_base_url";
+    public const string SyncEmailKey = "sync_email";
+    public const string SyncTokenKey = "sync_token";
+    public const string SyncCursorKey = "sync_cursor";
+    public const string SyncEnabledKey = "sync_enabled";
+    /// <summary>DPAPI-sealed sync key (passphrase-derived) + a verifier token.</summary>
+    public const string SyncKeyKey = "sync_key";
+    public const string SyncCheckKey = "sync_check";
 
     private readonly SqliteConnection _conn;
     private readonly ContentCipher _cipher;
@@ -119,14 +135,29 @@ public sealed class HistoryStore : IDisposable
                 id    INTEGER PRIMARY KEY AUTOINCREMENT,
                 name  TEXT NOT NULL,
                 sort  INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS sync_tombstones (
+                sync_uuid  TEXT PRIMARY KEY,
+                updated_ms INTEGER NOT NULL
             );";
         cmd.ExecuteNonQuery();
 
-        EnsureItemsListIdColumn();
+        EnsureItemsColumn("list_id", "INTEGER");
+        // Format fidelity (rich text) + OCR text for images. All encrypted at rest.
+        EnsureItemsColumn("html", "TEXT");
+        EnsureItemsColumn("rtf", "TEXT");
+        EnsureItemsColumn("ocr_text", "TEXT");
+        // Cross-device sync bookkeeping.
+        EnsureItemsColumn("sync_uuid", "TEXT");
+        EnsureItemsColumn("updated_ms", "INTEGER NOT NULL DEFAULT 0");
+        EnsureItemsColumn("sync_dirty", "INTEGER NOT NULL DEFAULT 1");
+        using SqliteCommand idx = _conn.CreateCommand();
+        idx.CommandText = "CREATE INDEX IF NOT EXISTS idx_items_syncuuid ON items(sync_uuid)";
+        idx.ExecuteNonQuery();
     }
 
-    /// <summary>Adds items.list_id to databases created before custom lists existed.</summary>
-    private void EnsureItemsListIdColumn()
+    /// <summary>Adds a column to <c>items</c> if a pre-existing database lacks it (lightweight migration).</summary>
+    private void EnsureItemsColumn(string name, string type)
     {
         bool exists = false;
         using (SqliteCommand info = _conn.CreateCommand())
@@ -135,7 +166,7 @@ public sealed class HistoryStore : IDisposable
             using SqliteDataReader reader = info.ExecuteReader();
             while (reader.Read())
             {
-                if (reader.GetString(1) == "list_id")
+                if (reader.GetString(1) == name)
                 {
                     exists = true;
                     break;
@@ -145,7 +176,7 @@ public sealed class HistoryStore : IDisposable
         if (!exists)
         {
             using SqliteCommand alter = _conn.CreateCommand();
-            alter.CommandText = "ALTER TABLE items ADD COLUMN list_id INTEGER";
+            alter.CommandText = $"ALTER TABLE items ADD COLUMN {name} {type}";
             alter.ExecuteNonQuery();
         }
     }
@@ -154,7 +185,8 @@ public sealed class HistoryStore : IDisposable
     /// Adds an item. If identical content already exists, bumps it to the top
     /// (move-to-front) instead of inserting a duplicate.
     /// </summary>
-    public void Add(ClipboardItem item)
+    /// <summary>Returns the row id of the inserted item, or of the existing row that was bumped.</summary>
+    public long Add(ClipboardItem item)
     {
         string hash = _cipher.DedupHash(ComputeCanonical(item));
 
@@ -165,16 +197,19 @@ public sealed class HistoryStore : IDisposable
             object? existing = find.ExecuteScalar();
             if (existing != null && existing != DBNull.Value)
             {
-                Touch(Convert.ToInt64(existing, CultureInfo.InvariantCulture));
-                return;
+                long existingId = Convert.ToInt64(existing, CultureInfo.InvariantCulture);
+                Touch(existingId);
+                return existingId;
             }
         }
 
+        long newId;
         using (SqliteCommand insert = _conn.CreateCommand())
         {
             insert.CommandText = @"
-                INSERT INTO items (type, text, image, preview, source_app, pinned, content_hash, created_at)
-                VALUES ($type, $text, $image, $preview, $src, 0, $hash, $created)";
+                INSERT INTO items (type, text, image, preview, source_app, pinned, content_hash, created_at, html, rtf, ocr_text, updated_ms, sync_dirty)
+                VALUES ($type, $text, $image, $preview, $src, 0, $hash, $created, $html, $rtf, $ocr, $ums, 1);
+                SELECT last_insert_rowid();";
             insert.Parameters.AddWithValue("$type", (int)item.Type);
             insert.Parameters.AddWithValue("$text", (object?)_cipher.EncryptText(item.Text) ?? DBNull.Value);
             insert.Parameters.AddWithValue("$image", (object?)_cipher.EncryptBlob(item.ImageData) ?? DBNull.Value);
@@ -182,10 +217,15 @@ public sealed class HistoryStore : IDisposable
             insert.Parameters.AddWithValue("$src", (object?)item.SourceApp ?? DBNull.Value);
             insert.Parameters.AddWithValue("$hash", hash);
             insert.Parameters.AddWithValue("$created", ToIso(DateTime.UtcNow));
-            insert.ExecuteNonQuery();
+            insert.Parameters.AddWithValue("$html", (object?)_cipher.EncryptText(item.Html) ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$rtf", (object?)_cipher.EncryptText(item.Rtf) ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$ocr", (object?)_cipher.EncryptText(item.OcrText) ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$ums", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            newId = Convert.ToInt64(insert.ExecuteScalar(), CultureInfo.InvariantCulture);
         }
 
         TrimOverflow();
+        return newId;
     }
 
     /// <summary>One-time: encrypt any rows left plaintext by a pre-encryption build.</summary>
@@ -232,7 +272,7 @@ public sealed class HistoryStore : IDisposable
     {
         using SqliteCommand cmd = _conn.CreateCommand();
         cmd.CommandText = @"
-            SELECT id, type, text, image, preview, source_app, pinned, created_at
+            SELECT id, type, text, image, preview, source_app, pinned, created_at, html, rtf, ocr_text
             FROM items
             ORDER BY pinned DESC, created_at DESC
             LIMIT $limit";
@@ -251,16 +291,189 @@ public sealed class HistoryStore : IDisposable
         string q = query.Trim();
         return GetAll(100000)
             .Where(i => (i.Text != null && i.Text.Contains(q, StringComparison.OrdinalIgnoreCase))
-                     || i.Preview.Contains(q, StringComparison.OrdinalIgnoreCase))
+                     || i.Preview.Contains(q, StringComparison.OrdinalIgnoreCase)
+                     || (i.OcrText != null && i.OcrText.Contains(q, StringComparison.OrdinalIgnoreCase)))
             .Take(limit)
             .ToList();
+    }
+
+    /// <summary>Stores recognized (OCR) text for an image row after async recognition completes.</summary>
+    public void UpdateOcrText(long id, string? text)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "UPDATE items SET ocr_text = $o, updated_ms = $ums, sync_dirty = 1 WHERE id = $id";
+        cmd.Parameters.AddWithValue("$o", (object?)_cipher.EncryptText(text) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ums", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    // ---- Cross-device sync bookkeeping ----
+
+    /// <summary>A text/image item that has local changes to push.</summary>
+    public List<ClipboardItem> GetDirtyForSync(int limit = 200)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT id, type, text, image, preview, source_app, pinned, created_at, html, rtf, ocr_text, sync_uuid, updated_ms
+            FROM items
+            WHERE sync_dirty = 1 AND type IN ($t, $i)
+            ORDER BY updated_ms ASC LIMIT $limit";
+        cmd.Parameters.AddWithValue("$t", (int)ClipItemType.Text);
+        cmd.Parameters.AddWithValue("$i", (int)ClipItemType.Image);
+        cmd.Parameters.AddWithValue("$limit", limit);
+        return ReadAllWithSync(cmd);
+    }
+
+    public void AssignSyncUuid(long id, string uuid)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "UPDATE items SET sync_uuid = $u WHERE id = $id";
+        cmd.Parameters.AddWithValue("$u", uuid);
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void MarkSynced(long id)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "UPDATE items SET sync_dirty = 0 WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Marks every text/image item dirty (used when sync is first enabled).</summary>
+    public void MarkAllDirty()
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "UPDATE items SET sync_dirty = 1 WHERE type IN ($t, $i)";
+        cmd.Parameters.AddWithValue("$t", (int)ClipItemType.Text);
+        cmd.Parameters.AddWithValue("$i", (int)ClipItemType.Image);
+        cmd.ExecuteNonQuery();
+    }
+
+    public (long Id, long UpdatedMs)? FindBySyncUuid(string uuid)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT id, updated_ms FROM items WHERE sync_uuid = $u LIMIT 1";
+        cmd.Parameters.AddWithValue("$u", uuid);
+        using SqliteDataReader r = cmd.ExecuteReader();
+        return r.Read() ? (r.GetInt64(0), r.GetInt64(1)) : null;
+    }
+
+    /// <summary>Applies a pulled remote item locally (last-write-wins by updated_ms).</summary>
+    public void UpsertFromSync(ClipboardItem item, string uuid, long updatedMs)
+    {
+        (long Id, long UpdatedMs)? existing = FindBySyncUuid(uuid);
+        if (existing is { } e)
+        {
+            if (updatedMs <= e.UpdatedMs)
+            {
+                return; // local is same or newer
+            }
+            using SqliteCommand up = _conn.CreateCommand();
+            up.CommandText = @"UPDATE items SET text=$text, image=$image, preview=$preview, html=$html, rtf=$rtf,
+                ocr_text=$ocr, updated_ms=$ums, sync_dirty=0 WHERE id=$id";
+            up.Parameters.AddWithValue("$text", (object?)_cipher.EncryptText(item.Text) ?? DBNull.Value);
+            up.Parameters.AddWithValue("$image", (object?)_cipher.EncryptBlob(item.ImageData) ?? DBNull.Value);
+            up.Parameters.AddWithValue("$preview", _cipher.EncryptText(item.Preview) ?? string.Empty);
+            up.Parameters.AddWithValue("$html", (object?)_cipher.EncryptText(item.Html) ?? DBNull.Value);
+            up.Parameters.AddWithValue("$rtf", (object?)_cipher.EncryptText(item.Rtf) ?? DBNull.Value);
+            up.Parameters.AddWithValue("$ocr", (object?)_cipher.EncryptText(item.OcrText) ?? DBNull.Value);
+            up.Parameters.AddWithValue("$ums", updatedMs);
+            up.Parameters.AddWithValue("$id", e.Id);
+            up.ExecuteNonQuery();
+            return;
+        }
+
+        using SqliteCommand insert = _conn.CreateCommand();
+        insert.CommandText = @"
+            INSERT INTO items (type, text, image, preview, source_app, pinned, content_hash, created_at, html, rtf, ocr_text, sync_uuid, updated_ms, sync_dirty)
+            VALUES ($type, $text, $image, $preview, NULL, 0, $hash, $created, $html, $rtf, $ocr, $uuid, $ums, 0)";
+        insert.Parameters.AddWithValue("$type", (int)item.Type);
+        insert.Parameters.AddWithValue("$text", (object?)_cipher.EncryptText(item.Text) ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$image", (object?)_cipher.EncryptBlob(item.ImageData) ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$preview", _cipher.EncryptText(item.Preview) ?? string.Empty);
+        insert.Parameters.AddWithValue("$hash", _cipher.DedupHash(ComputeCanonical(item)));
+        insert.Parameters.AddWithValue("$created", ToIso(DateTimeOffset.FromUnixTimeMilliseconds(updatedMs).UtcDateTime));
+        insert.Parameters.AddWithValue("$html", (object?)_cipher.EncryptText(item.Html) ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$rtf", (object?)_cipher.EncryptText(item.Rtf) ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$ocr", (object?)_cipher.EncryptText(item.OcrText) ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$uuid", uuid);
+        insert.Parameters.AddWithValue("$ums", updatedMs);
+        insert.ExecuteNonQuery();
+    }
+
+    /// <summary>Deletes a local item that was tombstoned remotely (no new tombstone created).</summary>
+    public void DeleteBySyncUuid(string uuid)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM items WHERE sync_uuid = $u";
+        cmd.Parameters.AddWithValue("$u", uuid);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void AddTombstone(string uuid)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "INSERT OR REPLACE INTO sync_tombstones (sync_uuid, updated_ms) VALUES ($u, $ms)";
+        cmd.Parameters.AddWithValue("$u", uuid);
+        cmd.Parameters.AddWithValue("$ms", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        cmd.ExecuteNonQuery();
+    }
+
+    public List<(string Uuid, long UpdatedMs)> GetTombstones()
+    {
+        var list = new List<(string, long)>();
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT sync_uuid, updated_ms FROM sync_tombstones";
+        using SqliteDataReader r = cmd.ExecuteReader();
+        while (r.Read())
+        {
+            list.Add((r.GetString(0), r.GetInt64(1)));
+        }
+        return list;
+    }
+
+    public void RemoveTombstone(string uuid)
+    {
+        using SqliteCommand cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM sync_tombstones WHERE sync_uuid = $u";
+        cmd.Parameters.AddWithValue("$u", uuid);
+        cmd.ExecuteNonQuery();
+    }
+
+    private List<ClipboardItem> ReadAllWithSync(SqliteCommand cmd)
+    {
+        var list = new List<ClipboardItem>();
+        using SqliteDataReader reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new ClipboardItem
+            {
+                Id = reader.GetInt64(0),
+                Type = (ClipItemType)reader.GetInt32(1),
+                Text = _cipher.DecryptText(reader.IsDBNull(2) ? null : reader.GetString(2)),
+                ImageData = _cipher.DecryptBlob(reader.IsDBNull(3) ? null : (byte[])reader.GetValue(3)),
+                Preview = _cipher.DecryptText(reader.GetString(4)) ?? string.Empty,
+                SourceApp = reader.IsDBNull(5) ? null : reader.GetString(5),
+                Pinned = reader.GetInt32(6) != 0,
+                CreatedAt = FromIso(reader.GetString(7)),
+                Html = _cipher.DecryptText(reader.IsDBNull(8) ? null : reader.GetString(8)),
+                Rtf = _cipher.DecryptText(reader.IsDBNull(9) ? null : reader.GetString(9)),
+                OcrText = _cipher.DecryptText(reader.IsDBNull(10) ? null : reader.GetString(10)),
+                SyncUuid = reader.IsDBNull(11) ? null : reader.GetString(11),
+                UpdatedMs = reader.GetInt64(12),
+            });
+        }
+        return list;
     }
 
     public ClipboardItem? GetMostRecentText()
     {
         using SqliteCommand cmd = _conn.CreateCommand();
         cmd.CommandText = @"
-            SELECT id, type, text, image, preview, source_app, pinned, created_at
+            SELECT id, type, text, image, preview, source_app, pinned, created_at, html, rtf, ocr_text
             FROM items
             WHERE type = $t
             ORDER BY created_at DESC
@@ -290,6 +503,17 @@ public sealed class HistoryStore : IDisposable
 
     public void Delete(long id)
     {
+        // If the item was synced, leave a tombstone so the deletion propagates to other devices.
+        using (SqliteCommand find = _conn.CreateCommand())
+        {
+            find.CommandText = "SELECT sync_uuid FROM items WHERE id = $id";
+            find.Parameters.AddWithValue("$id", id);
+            object? uuid = find.ExecuteScalar();
+            if (uuid is string s && s.Length > 0)
+            {
+                AddTombstone(s);
+            }
+        }
         using SqliteCommand cmd = _conn.CreateCommand();
         cmd.CommandText = "DELETE FROM items WHERE id = $id";
         cmd.Parameters.AddWithValue("$id", id);
@@ -486,7 +710,7 @@ public sealed class HistoryStore : IDisposable
     {
         using SqliteCommand cmd = _conn.CreateCommand();
         cmd.CommandText = @"
-            SELECT id, type, text, image, preview, source_app, pinned, created_at
+            SELECT id, type, text, image, preview, source_app, pinned, created_at, html, rtf, ocr_text
             FROM items WHERE list_id = $id
             ORDER BY pinned DESC, created_at DESC";
         cmd.Parameters.AddWithValue("$id", listId);
@@ -553,6 +777,9 @@ public sealed class HistoryStore : IDisposable
                 SourceApp = reader.IsDBNull(5) ? null : reader.GetString(5),
                 Pinned = reader.GetInt32(6) != 0,
                 CreatedAt = FromIso(reader.GetString(7)),
+                Html = _cipher.DecryptText(reader.IsDBNull(8) ? null : reader.GetString(8)),
+                Rtf = _cipher.DecryptText(reader.IsDBNull(9) ? null : reader.GetString(9)),
+                OcrText = _cipher.DecryptText(reader.IsDBNull(10) ? null : reader.GetString(10)),
             });
         }
         return list;

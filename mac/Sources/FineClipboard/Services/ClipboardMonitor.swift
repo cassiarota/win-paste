@@ -3,9 +3,19 @@ import Cocoa
 /// Polls the general pasteboard (macOS has no change event) and reports new captures.
 /// Mirrors the Windows `ClipboardMonitor`: pause (privacy mode), suppression (so our own
 /// pastes aren't re-captured), and source-app exclusion.
+/// One captured clipboard entry handed to the app.
+struct Capture {
+    let kind: ClipKind
+    let text: String?
+    let data: Data?
+    let preview: String
+    let source: String?
+    var html: String? = nil
+    var rtf: String? = nil
+}
+
 final class ClipboardMonitor {
-    /// kind, text, image-data (PNG), preview, source-app-name
-    var onCapture: ((ClipKind, String?, Data?, String, String?) -> Void)?
+    var onCapture: ((Capture) -> Void)?
     var shouldSkipSource: ((String?) -> Bool)?
     var paused = false
 
@@ -39,17 +49,25 @@ final class ClipboardMonitor {
         if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
             let paths = urls.map { $0.path }.joined(separator: "\n")
             let names = urls.map { $0.lastPathComponent }.joined(separator: ", ")
-            onCapture?(.files, paths, nil, names, source)
+            onCapture?(Capture(kind: .files, text: paths, data: nil, preview: names, source: source))
             return
         }
         if let s = pb.string(forType: .string), !s.isEmpty {
-            onCapture?(.text, s, nil, ClipboardMonitor.preview(s), source)
+            let html = ClipboardMonitor.nonEmpty(pb.string(forType: .html))
+            let rtf = ClipboardMonitor.nonEmpty(pb.data(forType: .rtf).flatMap { String(data: $0, encoding: .utf8) })
+            onCapture?(Capture(kind: .text, text: s, data: nil, preview: ClipboardMonitor.preview(s),
+                               source: source, html: html, rtf: rtf))
             return
         }
         if let png = ClipboardMonitor.readImagePNG(pb) {
-            onCapture?(.image, nil, png, "🖼 图片", source)
+            onCapture?(Capture(kind: .image, text: nil, data: png, preview: "🖼 图片", source: source))
             return
         }
+    }
+
+    private static func nonEmpty(_ s: String?) -> String? {
+        guard let s, !s.isEmpty else { return nil }
+        return s
     }
 
     static func preview(_ text: String) -> String {

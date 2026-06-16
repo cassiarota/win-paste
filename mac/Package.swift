@@ -23,6 +23,7 @@ let package = Package(
                 .linkedFramework("Cocoa"),
                 .linkedFramework("Carbon"),
                 .linkedFramework("CryptoKit"),
+                .linkedFramework("Vision"),
                 .linkedLibrary("sqlite3"),
             ]
         )

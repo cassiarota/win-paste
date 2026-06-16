@@ -85,8 +85,24 @@ public sealed class PasteService
 
         try
         {
-            if (plainText || item.Type == ClipItemType.Text)
+            if (item.Type == ClipItemType.Text)
             {
+                if (string.IsNullOrEmpty(item.Text))
+                {
+                    return;
+                }
+                if (!plainText && item.HasRichText)
+                {
+                    SetRichText(item);
+                }
+                else
+                {
+                    SetText(item.Text);
+                }
+            }
+            else if (plainText)
+            {
+                // Plain-text paste of a non-text item pastes its text representation (e.g. file paths).
                 if (!string.IsNullOrEmpty(item.Text))
                 {
                     SetText(item.Text);
@@ -112,6 +128,23 @@ public sealed class PasteService
 
     private static void SetText(string text) =>
         Retry(() => WpfClipboard.SetText(text, WpfTextDataFormat.UnicodeText));
+
+    /// <summary>Writes plain text plus HTML/RTF formats so the paste keeps its formatting.</summary>
+    private static void SetRichText(ClipboardItem item) =>
+        Retry(() =>
+        {
+            var data = new System.Windows.DataObject();
+            data.SetText(item.Text!, WpfTextDataFormat.UnicodeText);
+            if (!string.IsNullOrEmpty(item.Html))
+            {
+                data.SetText(item.Html, WpfTextDataFormat.Html);
+            }
+            if (!string.IsNullOrEmpty(item.Rtf))
+            {
+                data.SetText(item.Rtf, WpfTextDataFormat.Rtf);
+            }
+            WpfClipboard.SetDataObject(data, true);
+        });
 
     private static BitmapImage LoadBitmap(byte[] png)
     {

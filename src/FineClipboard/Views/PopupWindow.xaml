@@ -22,6 +22,7 @@
                 <MenuItem Header="转为小写" Click="MenuLower_Click" />
             </MenuItem>
             <Separator />
+            <MenuItem Tag="stack" Header="加入粘贴堆栈" Click="MenuAddToStack_Click" />
             <MenuItem Tag="movelist" Header="移到列表" />
             <MenuItem Tag="copy" Header="复制(放回剪贴板)" Click="MenuCopy_Click" />
             <MenuItem Tag="openurl" Header="用浏览器打开链接" Click="MenuOpenUrl_Click" />

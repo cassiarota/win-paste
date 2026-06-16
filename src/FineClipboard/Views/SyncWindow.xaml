@@ -1,0 +1,70 @@
+<Window x:Class="FineClipboard.Views.SyncWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="云同步" Width="440" Height="560"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        Background="{DynamicResource PopupBackground}">
+    <Window.Resources>
+        <Style x:Key="Lbl" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,10,0,3" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+        </Style>
+        <Style x:Key="Fld" TargetType="TextBox">
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+        <Style x:Key="Pwd" TargetType="PasswordBox">
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="云同步(跨设备)" FontSize="17" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimary}" />
+            <TextBlock TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource TextSecondary}"
+                       Text="在多台设备间同步剪贴板历史。内容用你的『同步口令』端到端加密后上传,服务器只保存密文。需要登录并具备 VIP 资格(用激活码开通)。密码永不参与同步。" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" Margin="0,14,0,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="服务器地址" Style="{StaticResource Lbl}" />
+                <TextBox x:Name="ServerBox" Style="{StaticResource Fld}" />
+
+                <TextBlock Text="账号" Margin="0,14,0,0" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" />
+                <TextBlock Text="邮箱" Style="{StaticResource Lbl}" />
+                <TextBox x:Name="EmailBox" Style="{StaticResource Fld}" />
+                <TextBlock Text="密码" Style="{StaticResource Lbl}" />
+                <PasswordBox x:Name="PassBox" Style="{StaticResource Pwd}" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <Button Content="登录" Click="Login_Click" Width="90" Margin="0,0,8,0" />
+                    <Button Content="注册" Click="Register_Click" Width="90" />
+                </StackPanel>
+
+                <TextBlock Text="VIP / 激活码" Margin="0,16,0,0" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" />
+                <TextBox x:Name="KeyBox" Style="{StaticResource Fld}" />
+                <Button Content="兑换激活码" Click="Redeem_Click" Width="120" HorizontalAlignment="Left" Margin="0,8,0,0" />
+
+                <TextBlock Text="同步口令(端到端加密)" Margin="0,16,0,0" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" />
+                <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" FontSize="11"
+                           Text="所有设备请使用相同的邮箱与同步口令。口令不上传,忘记将无法解密云端数据。" />
+                <PasswordBox x:Name="PhraseBox" Style="{StaticResource Pwd}" />
+                <Button Content="设置同步口令" Click="SetPhrase_Click" Width="130" HorizontalAlignment="Left" Margin="0,8,0,0" />
+
+                <CheckBox x:Name="EnableBox" Content="开启自动同步" Margin="0,16,0,0"
+                          Foreground="{DynamicResource TextPrimary}" Click="Enable_Click" />
+                <Button Content="立即同步" Click="SyncNow_Click" Width="120" HorizontalAlignment="Left" Margin="0,10,0,0" />
+
+                <TextBlock x:Name="StatusText" Margin="0,14,0,0" TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextSecondary}" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>

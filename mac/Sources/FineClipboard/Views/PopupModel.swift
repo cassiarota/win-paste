@@ -69,6 +69,7 @@ protocol PopupHost: AnyObject {
     func saveImage(item: ClipItem)
     func moveToList(item: ClipItem, listId: Int64?)
     func newListAndAdd(item: ClipItem)
+    func addToStack(item: ClipItem)
     func closePopup()
 }
 

@@ -8,6 +8,7 @@ using System.Windows.Media.Imaging;
 using FineClipboard.Interop;
 using FineClipboard.Models;
 using WpfClipboard = System.Windows.Clipboard;
+using WpfTextDataFormat = System.Windows.TextDataFormat;
 
 namespace FineClipboard.Services;
 
@@ -124,6 +125,8 @@ public sealed class ClipboardMonitor : IDisposable
                         {
                             Type = ClipItemType.Text,
                             Text = text,
+                            Html = TryGetFormat(WpfTextDataFormat.Html),
+                            Rtf = TryGetFormat(WpfTextDataFormat.Rtf),
                             Preview = MakePreview(text),
                             SourceApp = source,
                             CreatedAt = DateTime.UtcNow,
@@ -149,6 +152,24 @@ public sealed class ClipboardMonitor : IDisposable
     {
         string trimmed = text.Trim();
         return trimmed.Length > PreviewLength ? trimmed[..PreviewLength] : trimmed;
+    }
+
+    /// <summary>Best-effort read of an additional text format (HTML/RTF) from the clipboard.</summary>
+    private static string? TryGetFormat(WpfTextDataFormat format)
+    {
+        try
+        {
+            if (WpfClipboard.ContainsText(format))
+            {
+                string s = WpfClipboard.GetText(format);
+                return string.IsNullOrEmpty(s) ? null : s;
+            }
+        }
+        catch
+        {
+            // Some sources expose a format header without readable content — ignore.
+        }
+        return null;
     }
 
     private static byte[] EncodePng(BitmapSource source)

@@ -16,6 +16,12 @@ enum Keychain {
         return bytes
     }
 
+    /// Stores arbitrary key material for an account (used to seal the derived sync key).
+    static func setData(account: String, _ data: Data) { write(account, data) }
+
+    /// Reads previously stored key material, or nil if absent.
+    static func getData(account: String) -> Data? { read(account) }
+
     private static func read(_ account: String) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

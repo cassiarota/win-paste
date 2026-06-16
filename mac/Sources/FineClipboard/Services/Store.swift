@@ -12,6 +12,8 @@ final class Store {
     static let exclusionsKey = "exclusions"
     static let hotkeyPopupKey = "hotkey_popup"
     static let hotkeyPlainKey = "hotkey_plain"
+    static let hotkeyStackKey = "hotkey_stack"
+    static let hotkeyShotKey = "hotkey_shot"
     static let soundEnabledKey = "sound_enabled"
     static let maxItemsKey = "max_items"
     static let themeKey = "theme"
@@ -21,6 +23,13 @@ final class Store {
     static let pwCheckKey = "pw_check"
     static let pwKdfKey = "pw_kdf"
     static let encVersionKey = "enc_version"
+    // Sync settings.
+    static let syncBaseUrlKey = "sync_base_url"
+    static let syncEmailKey = "sync_email"
+    static let syncTokenKey = "sync_token"
+    static let syncCursorKey = "sync_cursor"
+    static let syncEnabledKey = "sync_enabled"
+    static let syncCheckKey = "sync_check"
 
     private var db: OpaquePointer?
     private var cipher: ContentCipher!
@@ -38,6 +47,16 @@ final class Store {
         sqlite3_open(path, &db)
         exec("PRAGMA journal_mode=WAL;")
         migrate()
+        // Format fidelity (rich text) + OCR text for images. Added to pre-existing databases.
+        ensureItemsColumn("html", "TEXT")
+        ensureItemsColumn("rtf", "TEXT")
+        ensureItemsColumn("ocr_text", "TEXT")
+        // Cross-device sync bookkeeping.
+        ensureItemsColumn("sync_uuid", "TEXT")
+        ensureItemsColumn("updated_ms", "INTEGER NOT NULL DEFAULT 0")
+        ensureItemsColumn("sync_dirty", "INTEGER NOT NULL DEFAULT 1")
+        exec("CREATE TABLE IF NOT EXISTS sync_tombstones (sync_uuid TEXT PRIMARY KEY, updated_ms INTEGER NOT NULL);")
+        exec("CREATE INDEX IF NOT EXISTS idx_items_syncuuid ON items(sync_uuid);")
         cipher = ContentCipher(keyData: Keychain.getOrCreateKey(account: "history-key"))
         restrictPermissions(dir)
         migrateEncryptionIfNeeded()
@@ -106,6 +125,18 @@ final class Store {
         """)
     }
 
+    /// Add a column to `items` if a pre-existing database lacks it (lightweight migration).
+    private func ensureItemsColumn(_ name: String, _ type: String) {
+        var present = false
+        if let stmt = prepare("PRAGMA table_info(items)") {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if columnText(stmt, 1) == name { present = true; break }
+            }
+            sqlite3_finalize(stmt)
+        }
+        if !present { exec("ALTER TABLE items ADD COLUMN \(name) \(type)") }
+    }
+
     // MARK: - low-level helpers
 
     private func exec(_ sql: String) {
@@ -171,10 +202,13 @@ final class Store {
             listId: sqlite3_column_type(stmt, 6) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 6),
             source: columnText(stmt, 7),
             createdAt: sqlite3_column_double(stmt, 8),
-            lastUsed: sqlite3_column_double(stmt, 9))
+            lastUsed: sqlite3_column_double(stmt, 9),
+            html: cipher.decryptText(columnText(stmt, 10)),
+            rtf: cipher.decryptText(columnText(stmt, 11)),
+            ocrText: cipher.decryptText(columnText(stmt, 12)))
     }
 
-    private static let itemCols = "id,kind,text,data,preview,pinned,list_id,source,created_at,last_used"
+    private static let itemCols = "id,kind,text,data,preview,pinned,list_id,source,created_at,last_used,html,rtf,ocr_text"
 
     private func query(_ where_: String, bind: ((OpaquePointer?) -> Void)? = nil, limit: Int? = nil) -> [ClipItem] {
         var sql = "SELECT \(Store.itemCols) FROM items"
@@ -203,6 +237,7 @@ final class Store {
         let t = term.lowercased()
         let matched = query("").filter {
             ($0.text?.lowercased().contains(t) ?? false) || $0.preview.lowercased().contains(t)
+                || ($0.ocrText?.lowercased().contains(t) ?? false)
         }
         return Array(matched.prefix(limit))
     }
@@ -220,7 +255,8 @@ final class Store {
 
     /// Insert a new item, or if identical content already exists bump it to the top.
     @discardableResult
-    func add(kind: ClipKind, text: String?, data: Data?, preview: String, source: String?) -> Int64 {
+    func add(kind: ClipKind, text: String?, data: Data?, preview: String, source: String?,
+             html: String? = nil, rtf: String? = nil, ocr: String? = nil) -> Int64 {
         let h = cipher.dedupHash(canonical(kind: kind, text: text, data: data))
         let now = Date().timeIntervalSince1970
         // De-dup: bump existing identical content to the top.
@@ -233,7 +269,7 @@ final class Store {
                 return id
             }
         }
-        let stmt = prepare("INSERT INTO items(kind,text,data,preview,hash,pinned,list_id,source,created_at,last_used) VALUES(?,?,?,?,?,0,NULL,?,?,?)")
+        let stmt = prepare("INSERT INTO items(kind,text,data,preview,hash,pinned,list_id,source,created_at,last_used,html,rtf,ocr_text,updated_ms,sync_dirty) VALUES(?,?,?,?,?,0,NULL,?,?,?,?,?,?,?,1)")
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int(stmt, 1, Int32(kind.rawValue))
         bindText(stmt, 2, cipher.encryptText(text))
@@ -243,8 +279,22 @@ final class Store {
         bindText(stmt, 6, source)
         sqlite3_bind_double(stmt, 7, now)
         sqlite3_bind_double(stmt, 8, now)
+        bindText(stmt, 9, cipher.encryptText(html))
+        bindText(stmt, 10, cipher.encryptText(rtf))
+        bindText(stmt, 11, cipher.encryptText(ocr))
+        sqlite3_bind_int64(stmt, 12, Int64(now * 1000))
         sqlite3_step(stmt)
         return sqlite3_last_insert_rowid(db)
+    }
+
+    /// Stores recognized (OCR) text for an image row after async recognition completes.
+    func updateOcrText(_ id: Int64, _ text: String?) {
+        let stmt = prepare("UPDATE items SET ocr_text=?, updated_ms=?, sync_dirty=1 WHERE id=?")
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, cipher.encryptText(text))
+        sqlite3_bind_int64(stmt, 2, Int64(Date().timeIntervalSince1970 * 1000))
+        sqlite3_bind_int64(stmt, 3, id)
+        sqlite3_step(stmt)
     }
 
     func touch(_ id: Int64) {
@@ -268,10 +318,130 @@ final class Store {
     }
 
     func delete(_ id: Int64) {
+        // If the item was synced, leave a tombstone so the deletion propagates to other devices.
+        if let find = prepare("SELECT sync_uuid FROM items WHERE id=?") {
+            sqlite3_bind_int64(find, 1, id)
+            if sqlite3_step(find) == SQLITE_ROW, let uuid = columnText(find, 0), !uuid.isEmpty {
+                addTombstone(uuid)
+            }
+            sqlite3_finalize(find)
+        }
         let stmt = prepare("DELETE FROM items WHERE id=?")
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, id)
         sqlite3_step(stmt)
+    }
+
+    // MARK: - sync bookkeeping
+
+    private static let syncCols = "id,kind,text,data,preview,pinned,list_id,source,created_at,last_used,html,rtf,ocr_text,sync_uuid,updated_ms"
+
+    private func rowToSyncItem(_ stmt: OpaquePointer?) -> ClipItem {
+        var it = rowToItem(stmt) // columns 0..12 match itemCols
+        it.syncUuid = sqlite3_column_type(stmt, 13) == SQLITE_NULL ? nil : columnText(stmt, 13)
+        it.updatedMs = sqlite3_column_int64(stmt, 14)
+        return it
+    }
+
+    /// Text/image items with local changes to push.
+    func dirtyForSync(limit: Int = 200) -> [ClipItem] {
+        let sql = "SELECT \(Store.syncCols) FROM items WHERE sync_dirty=1 AND kind IN (0,1) ORDER BY updated_ms ASC LIMIT \(limit)"
+        let stmt = prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        var out: [ClipItem] = []
+        while sqlite3_step(stmt) == SQLITE_ROW { out.append(rowToSyncItem(stmt)) }
+        return out
+    }
+
+    func assignSyncUuid(_ id: Int64, _ uuid: String) {
+        let stmt = prepare("UPDATE items SET sync_uuid=? WHERE id=?")
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, uuid); sqlite3_bind_int64(stmt, 2, id)
+        sqlite3_step(stmt)
+    }
+
+    func markSynced(_ id: Int64) {
+        let stmt = prepare("UPDATE items SET sync_dirty=0 WHERE id=?")
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, id); sqlite3_step(stmt)
+    }
+
+    /// Marks every text/image item dirty (used when sync is first enabled).
+    func markAllDirty() { exec("UPDATE items SET sync_dirty=1 WHERE kind IN (0,1)") }
+
+    func findBySyncUuid(_ uuid: String) -> (id: Int64, updatedMs: Int64)? {
+        let stmt = prepare("SELECT id, updated_ms FROM items WHERE sync_uuid=? LIMIT 1")
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, uuid)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return (sqlite3_column_int64(stmt, 0), sqlite3_column_int64(stmt, 1))
+    }
+
+    /// Applies a pulled remote item locally (last-write-wins by updatedMs).
+    func upsertFromSync(kind: ClipKind, text: String?, data: Data?, preview: String,
+                        html: String?, rtf: String?, ocr: String?, uuid: String, updatedMs: Int64) {
+        if let e = findBySyncUuid(uuid) {
+            if updatedMs <= e.updatedMs { return }
+            let up = prepare("UPDATE items SET text=?, data=?, preview=?, html=?, rtf=?, ocr_text=?, updated_ms=?, sync_dirty=0 WHERE id=?")
+            defer { sqlite3_finalize(up) }
+            bindText(up, 1, cipher.encryptText(text))
+            bindBlob(up, 2, cipher.encryptBlob(data))
+            bindText(up, 3, cipher.encryptText(preview))
+            bindText(up, 4, cipher.encryptText(html))
+            bindText(up, 5, cipher.encryptText(rtf))
+            bindText(up, 6, cipher.encryptText(ocr))
+            sqlite3_bind_int64(up, 7, updatedMs)
+            sqlite3_bind_int64(up, 8, e.id)
+            sqlite3_step(up)
+            return
+        }
+        let h = cipher.dedupHash(canonical(kind: kind, text: text, data: data))
+        let secs = Double(updatedMs) / 1000.0
+        let stmt = prepare("INSERT INTO items(kind,text,data,preview,hash,pinned,list_id,source,created_at,last_used,html,rtf,ocr_text,sync_uuid,updated_ms,sync_dirty) VALUES(?,?,?,?,?,0,NULL,NULL,?,?,?,?,?,?,?,0)")
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, Int32(kind.rawValue))
+        bindText(stmt, 2, cipher.encryptText(text))
+        bindBlob(stmt, 3, cipher.encryptBlob(data))
+        bindText(stmt, 4, cipher.encryptText(preview))
+        bindText(stmt, 5, h)
+        sqlite3_bind_double(stmt, 6, secs)
+        sqlite3_bind_double(stmt, 7, secs)
+        bindText(stmt, 8, cipher.encryptText(html))
+        bindText(stmt, 9, cipher.encryptText(rtf))
+        bindText(stmt, 10, cipher.encryptText(ocr))
+        bindText(stmt, 11, uuid)
+        sqlite3_bind_int64(stmt, 12, updatedMs)
+        sqlite3_step(stmt)
+    }
+
+    func deleteBySyncUuid(_ uuid: String) {
+        let stmt = prepare("DELETE FROM items WHERE sync_uuid=?")
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, uuid); sqlite3_step(stmt)
+    }
+
+    func addTombstone(_ uuid: String) {
+        let stmt = prepare("INSERT OR REPLACE INTO sync_tombstones(sync_uuid, updated_ms) VALUES(?,?)")
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, uuid)
+        sqlite3_bind_int64(stmt, 2, Int64(Date().timeIntervalSince1970 * 1000))
+        sqlite3_step(stmt)
+    }
+
+    func tombstones() -> [(uuid: String, updatedMs: Int64)] {
+        let stmt = prepare("SELECT sync_uuid, updated_ms FROM sync_tombstones")
+        defer { sqlite3_finalize(stmt) }
+        var out: [(String, Int64)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            out.append((columnText(stmt, 0) ?? "", sqlite3_column_int64(stmt, 1)))
+        }
+        return out
+    }
+
+    func removeTombstone(_ uuid: String) {
+        let stmt = prepare("DELETE FROM sync_tombstones WHERE sync_uuid=?")
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, uuid); sqlite3_step(stmt)
     }
 
     func assignToList(_ id: Int64, listId: Int64?) {

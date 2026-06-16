@@ -149,6 +149,7 @@ struct PopupView: View {
                 }
             }
             Button("复制(放回剪贴板)") { model.host?.copy(item: item) }
+            Button("加入粘贴堆栈") { model.host?.addToStack(item: item) }
             Divider()
             if item.kind == .text, looksLikeURL(item.text) {
                 Button("打开链接") { model.host?.openLink(item: item) }
