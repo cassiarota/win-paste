@@ -12,6 +12,7 @@ public partial class SyncWindow : Window
     public SyncWindow(SyncEngine sync)
     {
         InitializeComponent();
+        Icon = AppIconFactory.CreateImageSource();
         _sync = sync;
         ServerBox.Text = _sync.BaseUrl;
         EmailBox.Text = _sync.Email ?? string.Empty;

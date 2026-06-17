@@ -14,25 +14,37 @@ public static class ThemeManager
     {
         if (IsDark(mode))
         {
-            Set("PopupBackground", "#1E1E22");
-            Set("SurfaceBackground", "#2C2C31");
-            Set("SurfaceHover", "#3A3A41");
-            Set("SurfaceSelected", "#34507A");
-            Set("TextPrimary", "#ECECEC");
-            Set("TextSecondary", "#9AA0A6");
-            Set("BorderBrush", "#33FFFFFF");
-            Set("AccentBrush", "#3B82F6");
+            Set("GlassPanelBrush", "#E5162231");
+            Set("GlassSurfaceBrush", "#551E2B3C");
+            Set("GlassSurfaceHoverBrush", "#70304A68");
+            Set("GlassBorderBrush", "#35FFFFFF");
+            Set("GlassBorderSubtleBrush", "#24FFFFFF");
+            Set("PopupBackground", "#E5162231");
+            Set("SurfaceBackground", "#541E2B3C");
+            Set("SurfaceHover", "#70304A68");
+            Set("SurfaceSelected", "#7A285A88");
+            Set("TextPrimary", "#F1F6FF");
+            Set("TextSecondary", "#A7B3C6");
+            Set("BorderBrush", "#35FFFFFF");
+            Set("AccentBrush", "#5CB8FF");
+            Set("AccentSoftBrush", "#335CB8FF");
         }
         else
         {
-            Set("PopupBackground", "#F4F4F6");
-            Set("SurfaceBackground", "#FFFFFF");
-            Set("SurfaceHover", "#EAF2FF");
-            Set("SurfaceSelected", "#DCEBFF");
-            Set("TextPrimary", "#222222");
-            Set("TextSecondary", "#9A9A9A");
-            Set("BorderBrush", "#22000000");
-            Set("AccentBrush", "#3B82F6");
+            Set("GlassPanelBrush", "#EAF5F8FC");
+            Set("GlassSurfaceBrush", "#BFFFFFFF");
+            Set("GlassSurfaceHoverBrush", "#DDEAF4FF");
+            Set("GlassBorderBrush", "#88FFFFFF");
+            Set("GlassBorderSubtleBrush", "#330B1B2E");
+            Set("PopupBackground", "#EAF5F8FC");
+            Set("SurfaceBackground", "#AAFFFFFF");
+            Set("SurfaceHover", "#DCEAF4FF");
+            Set("SurfaceSelected", "#C7DCEBFF");
+            Set("TextPrimary", "#172033");
+            Set("TextSecondary", "#687489");
+            Set("BorderBrush", "#78FFFFFF");
+            Set("AccentBrush", "#408CF4");
+            Set("AccentSoftBrush", "#263F8CFF");
         }
     }
 

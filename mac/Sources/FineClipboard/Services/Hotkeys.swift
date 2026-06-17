@@ -8,7 +8,6 @@ struct HotkeyCombo: Equatable {
 
     static let defaultPopup = HotkeyCombo(modifiers: UInt32(cmdKey | shiftKey), keyCode: UInt32(kVK_ANSI_V))
     static let defaultPlain = HotkeyCombo(modifiers: UInt32(cmdKey | shiftKey), keyCode: UInt32(kVK_ANSI_B))
-    static let defaultStack = HotkeyCombo(modifiers: UInt32(cmdKey | shiftKey), keyCode: UInt32(kVK_ANSI_X))
     static let defaultShot = HotkeyCombo(modifiers: UInt32(cmdKey | shiftKey), keyCode: UInt32(kVK_ANSI_A))
 
     func serialize() -> String { "\(modifiers):\(keyCode)" }

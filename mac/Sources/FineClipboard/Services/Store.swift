@@ -12,7 +12,6 @@ final class Store {
     static let exclusionsKey = "exclusions"
     static let hotkeyPopupKey = "hotkey_popup"
     static let hotkeyPlainKey = "hotkey_plain"
-    static let hotkeyStackKey = "hotkey_stack"
     static let hotkeyShotKey = "hotkey_shot"
     static let soundEnabledKey = "sound_enabled"
     static let maxItemsKey = "max_items"

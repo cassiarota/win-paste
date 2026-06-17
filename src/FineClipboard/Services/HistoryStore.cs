@@ -30,9 +30,6 @@ public sealed class HistoryStore : IDisposable
     /// <summary>Settings key: paste-recent-as-plain-text hotkey, serialized as "modifiers:vk".</summary>
     public const string HotkeyPlainKey = "hotkey_plain";
 
-    /// <summary>Settings key: paste-next-from-stack hotkey, serialized as "modifiers:vk".</summary>
-    public const string HotkeyStackKey = "hotkey_stack";
-
     /// <summary>Settings key: screenshot (region capture) hotkey, serialized as "modifiers:vk".</summary>
     public const string HotkeyShotKey = "hotkey_shot";
 

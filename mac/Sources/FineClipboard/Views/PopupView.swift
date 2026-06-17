@@ -24,8 +24,9 @@ struct PopupView: View {
                     .focused($searchFocused)
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
-
-            Divider()
+            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
 
             // Tabs
             ScrollView(.horizontal, showsIndicators: false) {
@@ -35,7 +36,7 @@ struct PopupView: View {
                         Text(entry.title)
                             .font(.system(size: 12))
                             .padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(isSel ? Color.accentColor : Color.secondary.opacity(0.12))
+                            .background(isSel ? Color.accentColor.opacity(0.88) : Color.secondary.opacity(0.12))
                             .foregroundColor(isSel ? .white : .primary)
                             .clipShape(Capsule())
                             .onTapGesture { model.select(tab: entry.tab) }
@@ -43,8 +44,6 @@ struct PopupView: View {
                 }
                 .padding(.horizontal, 10).padding(.vertical, 6)
             }
-
-            Divider()
 
             // Rows
             if model.rows.isEmpty {
@@ -66,7 +65,7 @@ struct PopupView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(.regularMaterial)
         .onAppear { searchFocused = true }
     }
 
@@ -105,7 +104,10 @@ struct PopupView: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSel ? Color.accentColor.opacity(0.22) : Color.clear)
+        .background(isSel ? Color.accentColor.opacity(0.20) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(isSel ? Color.accentColor.opacity(0.28) : Color.white.opacity(0.10)))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { model.activate(row, plain: false) }
         .onTapGesture(count: 1) { model.selected = index }
@@ -117,9 +119,12 @@ struct PopupView: View {
     private func thumbnail(_ row: PopupRow) -> some View {
         if let data = row.item?.data, row.item?.kind == .image, let img = NSImage(data: data) {
             Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
-                .frame(width: 26, height: 26).clipShape(RoundedRectangle(cornerRadius: 4))
+                .frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 8))
         } else {
-            Image(systemName: row.symbol).foregroundColor(.secondary).frame(width: 22)
+            Image(systemName: row.symbol)
+                .foregroundColor(.secondary)
+                .frame(width: 30, height: 30)
+                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 
@@ -149,7 +154,6 @@ struct PopupView: View {
                 }
             }
             Button("复制(放回剪贴板)") { model.host?.copy(item: item) }
-            Button("加入粘贴堆栈") { model.host?.addToStack(item: item) }
             Divider()
             if item.kind == .text, looksLikeURL(item.text) {
                 Button("打开链接") { model.host?.openLink(item: item) }

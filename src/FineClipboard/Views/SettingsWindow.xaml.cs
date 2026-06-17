@@ -27,16 +27,20 @@ public partial class SettingsWindow : Window
         _store = store;
         _app = app;
 
+        Icon = AppIconFactory.CreateImageSource();
+        AppIconImage.Source = AppIconFactory.CreateImageSource(44);
         string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.1.0";
         VersionText.Text = $"版本 {version}";
         StartupCheck.IsChecked = StartupManager.IsEnabled();
         SoundCheck.IsChecked = _store.GetSetting(HistoryStore.SoundEnabledKey) == "1";
+        PauseCheck.IsChecked = _app.IsRecordingPaused;
         LoadExpirySelection();
         ExclusionsBox.Text = _store.GetSetting(HistoryStore.ExclusionsKey) ?? string.Empty;
         SelectByTag(MaxItemsCombo, _store.GetSetting(HistoryStore.MaxItemsKey) ?? "1000");
         SelectByTag(ThemeCombo, _store.GetSetting(HistoryStore.ThemeKey) ?? "system");
         SelectByTag(PopupSizeCombo, _store.GetSetting(HistoryStore.PopupSizeKey) ?? "medium");
         MasterPwButton.Content = _app.Vault.IsConfigured ? "修改主密码…" : "设置主密码…";
+        ShotHotkeyText.Text = _app.ScreenshotHotkeyDisplay();
         LoadHotkeyDisplay();
         RefreshCount();
         _initializing = false;
@@ -63,6 +67,15 @@ public partial class SettingsWindow : Window
             return;
         }
         _store.SetSetting(HistoryStore.SoundEnabledKey, SoundCheck.IsChecked == true ? "1" : "0");
+    }
+
+    private void PauseCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (_initializing)
+        {
+            return;
+        }
+        _app.SetRecordingPaused(PauseCheck.IsChecked == true);
     }
 
     // ---- Custom hotkeys ----
@@ -215,6 +228,8 @@ public partial class SettingsWindow : Window
         new ListsWindow(_store) { Owner = this }.ShowDialog();
     }
 
+    private void OpenSync_Click(object sender, RoutedEventArgs e) => _app.ShowSyncSettings();
+
     // ---- Password protection ----
     private void MasterPw_Click(object sender, RoutedEventArgs e)
     {
@@ -246,6 +261,8 @@ public partial class SettingsWindow : Window
         }
         new PasswordsWindow(_app.Vault) { Owner = this }.ShowDialog();
     }
+
+    private void LockPasswords_Click(object sender, RoutedEventArgs e) => _app.LockVault();
 
     private void SaveTag(ComboBox combo, string settingKey)
     {

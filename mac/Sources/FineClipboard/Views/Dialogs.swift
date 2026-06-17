@@ -10,6 +10,11 @@ protocol AppControl: AnyObject {
     func resumeHotkeys()
     func trySetHotkey(popup: Bool, combo: HotkeyCombo) -> Bool
     func applyAppearance(_ tag: String)
+    var isRecordingPaused: Bool { get }
+    func setRecordingPaused(_ paused: Bool)
+    func showSyncSettings()
+    func lockVault()
+    func screenshotHotkeyDisplay() -> String
 }
 
 /// Simple modal prompts built on NSAlert (used for the small editors).

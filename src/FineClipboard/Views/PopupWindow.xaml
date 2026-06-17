@@ -22,7 +22,6 @@
                 <MenuItem Header="转为小写" Click="MenuLower_Click" />
             </MenuItem>
             <Separator />
-            <MenuItem Tag="stack" Header="加入粘贴堆栈" Click="MenuAddToStack_Click" />
             <MenuItem Tag="movelist" Header="移到列表" />
             <MenuItem Tag="copy" Header="复制(放回剪贴板)" Click="MenuCopy_Click" />
             <MenuItem Tag="openurl" Header="用浏览器打开链接" Click="MenuOpenUrl_Click" />
@@ -34,13 +33,13 @@
         </ContextMenu>
     </Window.Resources>
 
-    <Border CornerRadius="14" Background="{DynamicResource PopupBackground}"
-            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+    <Border CornerRadius="20" Background="{DynamicResource PopupBackground}"
+            BorderBrush="{DynamicResource GlassBorderBrush}" BorderThickness="1">
         <Border.Effect>
-            <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.28" Color="#000000" />
+            <DropShadowEffect BlurRadius="30" ShadowDepth="0" Opacity="0.24" Color="#00142A" />
         </Border.Effect>
 
-        <Grid Margin="10">
+        <Grid Margin="12">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -49,7 +48,8 @@
             </Grid.RowDefinitions>
 
             <!-- Search box -->
-            <Border Grid.Row="0" CornerRadius="9" Background="{DynamicResource SurfaceBackground}" Padding="10,7" Margin="2,2,2,8">
+            <Border Grid.Row="0" CornerRadius="13" Background="{DynamicResource SurfaceBackground}" Padding="12,8" Margin="2,2,2,10"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                 <Grid>
                     <TextBlock x:Name="SearchPlaceholder" Text="搜索剪贴板历史…"
                                Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" IsHitTestVisible="False" />
@@ -78,7 +78,7 @@
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="ListBoxItem">
-                                    <Border x:Name="pill" CornerRadius="11" Padding="12,4" Background="#00000000">
+                                    <Border x:Name="pill" CornerRadius="12" Padding="12,5" Background="#00000000">
                                         <ContentPresenter HorizontalAlignment="Center" />
                                     </Border>
                                     <ControlTemplate.Triggers>
@@ -122,7 +122,8 @@
                             <Setter Property="Template">
                                 <Setter.Value>
                                     <ControlTemplate TargetType="ListBoxItem">
-                                        <Border x:Name="bd" CornerRadius="9" Background="{DynamicResource SurfaceBackground}" Padding="10,8">
+                                        <Border x:Name="bd" CornerRadius="13" Background="{DynamicResource SurfaceBackground}" Padding="10,8"
+                                                BorderBrush="{DynamicResource GlassBorderSubtleBrush}" BorderThickness="1">
                                             <ContentPresenter />
                                         </Border>
                                         <ControlTemplate.Triggers>
@@ -156,8 +157,8 @@
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
 
-                                <Border Grid.Column="1" Width="38" Height="38" CornerRadius="8"
-                                        Background="#F56A36" Margin="0,0,10,0" ClipToBounds="True">
+                                <Border Grid.Column="1" Width="38" Height="38" CornerRadius="10"
+                                        Background="{DynamicResource AccentBrush}" Margin="0,0,10,0" ClipToBounds="True">
                                     <Grid>
                                         <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
                                         <TextBlock Text="{Binding Glyph}" Visibility="{Binding GlyphVisibility}"

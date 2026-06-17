@@ -6,7 +6,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
     lazy var vault = Vault(store)
 
     private let monitor = ClipboardMonitor()
-    private let pasteStack = PasteStack()
     private lazy var sync = SyncEngine(store)
     private var syncTimer: Timer?
     private var syncing = false
@@ -14,12 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
     private lazy var popup = PopupController(model: PopupModel(store: store, vault: vault))
 
     private var statusItem: NSStatusItem!
-    private var openItem: NSMenuItem!
-    private var pauseItem: NSMenuItem!
-    private var startupItem: NSMenuItem!
     private var updateItem: NSMenuItem!
-    private var stackItem: NSMenuItem!
     private var updateURL: String?
+    private var pendingScreenshotPreview = false
+    private var pendingScreenshotPreviewUntil = Date.distantPast
 
     private var previousApp: NSRunningApplication?
     private var purgeTimer: Timer?
@@ -28,10 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
     private var snippetsWC: NSWindowController?
     private var listsWC: NSWindowController?
     private var passwordsWC: NSWindowController?
+    private var screenshotPreviewWC: NSWindowController?
 
     private static let popupHotkeyID: UInt32 = 1
     private static let plainHotkeyID: UInt32 = 2
-    private static let stackHotkeyID: UInt32 = 3
     private static let shotHotkeyID: UInt32 = 4
 
     // MARK: - lifecycle
@@ -80,6 +77,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
                     self?.popup.reloadIfVisible()
                 }
             }
+        }
+
+        if pendingScreenshotPreview, Date() > pendingScreenshotPreviewUntil {
+            pendingScreenshotPreview = false
+        }
+
+        if pendingScreenshotPreview, cap.kind == .image, let png = cap.data {
+            pendingScreenshotPreview = false
+            showScreenshotPreview(data: png)
         }
 
         if store.setting(Store.soundEnabledKey) == "1" { NSSound(named: "Pop")?.play() }
@@ -144,13 +150,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         HotkeyManager.shared.unregisterAll()
         let popupCombo = HotkeyCombo.parse(store.setting(Store.hotkeyPopupKey), default: .defaultPopup)
         let plainCombo = HotkeyCombo.parse(store.setting(Store.hotkeyPlainKey), default: .defaultPlain)
-        let stackCombo = HotkeyCombo.parse(store.setting(Store.hotkeyStackKey), default: .defaultStack)
         let shotCombo = HotkeyCombo.parse(store.setting(Store.hotkeyShotKey), default: .defaultShot)
         let a = HotkeyManager.shared.register(id: Self.popupHotkeyID, combo: popupCombo) { [weak self] in self?.showPopup() }
         let b = HotkeyManager.shared.register(id: Self.plainHotkeyID, combo: plainCombo) { [weak self] in self?.pasteRecentPlain() }
-        _ = HotkeyManager.shared.register(id: Self.stackHotkeyID, combo: stackCombo) { [weak self] in self?.pasteNextFromStack() }
-        _ = HotkeyManager.shared.register(id: Self.shotHotkeyID, combo: shotCombo) { Screenshot.capture(.region) }
-        openItem?.title = "打开历史 (\(popupCombo.display()))"
+        _ = HotkeyManager.shared.register(id: Self.shotHotkeyID, combo: shotCombo) { [weak self] in self?.captureScreenshot(.region) }
         return (a, b)
     }
 
@@ -170,6 +173,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
     }
 
     func applyAppearance(_ tag: String) { Appearance.apply(tag) }
+    func setRecordingPaused(_ paused: Bool) { monitor.paused = paused }
+    var isRecordingPaused: Bool { monitor.paused }
+    func showSyncSettings() { showSync() }
+    func lockVault() { vault.lock() }
+    func screenshotHotkeyDisplay() -> String {
+        HotkeyCombo.parse(store.setting(Store.hotkeyShotKey), default: .defaultShot).display()
+    }
 
     // MARK: - paste orchestration
 
@@ -214,33 +224,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         hidePopup()
         monitor.suppress()
         Paste.writeItem(item)
-    }
-
-    // MARK: - paste stack
-
-    func addToStack(item: ClipItem) {
-        pasteStack.enqueue(item)
-        updateStackMenu()
-    }
-
-    /// Pastes the next stacked item into the current foreground app (FIFO), then advances.
-    private func pasteNextFromStack() {
-        guard let item = pasteStack.dequeue() else { return }
-        updateStackMenu()
-        previousApp = NSWorkspace.shared.frontmostApplication
-        monitor.suppress()
-        Paste.writeItem(item)
-        store.touch(item.id)
-        activateAndPaste()
-    }
-
-    private func updateStackMenu() {
-        stackItem?.title = "粘贴堆栈:\(pasteStack.count) 项"
-    }
-
-    @objc private func clearStackAction() {
-        pasteStack.clear()
-        updateStackMenu()
     }
 
     func setPinned(_ item: ClipItem, _ pinned: Bool) { store.setPinned(item.id, pinned); popup.model.reload() }
@@ -306,40 +289,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            let img = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "FineClipboard")
-            img?.isTemplate = true
-            button.image = img
+            button.image = makeStatusIcon()
         }
 
         let menu = NSMenu()
-        let popupCombo = HotkeyCombo.parse(store.setting(Store.hotkeyPopupKey), default: .defaultPopup)
-        openItem = NSMenuItem(title: "打开历史 (\(popupCombo.display()))", action: #selector(openPopupAction), keyEquivalent: "")
-        openItem.target = self
-        menu.addItem(openItem)
-
         let settings = NSMenuItem(title: "设置…", action: #selector(openSettingsAction), keyEquivalent: "")
         settings.target = self
         menu.addItem(settings)
-
-        let syncItem = NSMenuItem(title: "云同步…", action: #selector(openSyncAction), keyEquivalent: "")
-        syncItem.target = self
-        menu.addItem(syncItem)
-
-        pauseItem = NSMenuItem(title: "暂停记录(隐私模式)", action: #selector(togglePauseAction), keyEquivalent: "")
-        pauseItem.target = self
-        menu.addItem(pauseItem)
-
-        let lock = NSMenuItem(title: "锁定密码", action: #selector(lockVaultAction), keyEquivalent: "")
-        lock.target = self
-        menu.addItem(lock)
-
-        let stackCombo = HotkeyCombo.parse(store.setting(Store.hotkeyStackKey), default: .defaultStack)
-        stackItem = NSMenuItem(title: "粘贴堆栈:0 项", action: nil, keyEquivalent: "")
-        stackItem.isEnabled = false
-        menu.addItem(stackItem)
-        let clearStack = NSMenuItem(title: "清空粘贴堆栈 (下一项 \(stackCombo.display()))", action: #selector(clearStackAction), keyEquivalent: "")
-        clearStack.target = self
-        menu.addItem(clearStack)
 
         let shotCombo = HotkeyCombo.parse(store.setting(Store.hotkeyShotKey), default: .defaultShot)
         let shotMenu = NSMenu()
@@ -356,11 +312,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         shotItem.submenu = shotMenu
         menu.addItem(shotItem)
 
-        startupItem = NSMenuItem(title: "开机自启", action: #selector(toggleStartupAction), keyEquivalent: "")
-        startupItem.target = self
-        startupItem.state = LoginItem.isEnabled ? .on : .off
-        menu.addItem(startupItem)
-
         updateItem = NSMenuItem(title: "检查更新…", action: #selector(checkUpdateAction), keyEquivalent: "")
         updateItem.target = self
         menu.addItem(updateItem)
@@ -373,23 +324,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         statusItem.menu = menu
     }
 
-    @objc private func openPopupAction() { showPopup() }
-    @objc private func openSettingsAction() { showSettings() }
-    @objc private func lockVaultAction() { vault.lock() }
-    @objc private func quitAction() { NSApp.terminate(nil) }
-    @objc private func shotRegionAction() { Screenshot.capture(.region) }
-    @objc private func shotWindowAction() { Screenshot.capture(.window) }
-    @objc private func shotFullAction() { Screenshot.capture(.fullscreen) }
+    private func makeStatusIcon() -> NSImage {
+        let image = NSImage(size: NSSize(width: 18, height: 18))
+        image.lockFocus()
+        NSColor.labelColor.setStroke()
+        let stroke = NSBezierPath()
+        stroke.lineWidth = 1.8
+        stroke.lineCapStyle = .round
+        stroke.lineJoinStyle = .round
+        stroke.move(to: NSPoint(x: 6, y: 14))
+        stroke.line(to: NSPoint(x: 12, y: 14))
+        stroke.move(to: NSPoint(x: 5, y: 12))
+        stroke.curve(to: NSPoint(x: 4, y: 10), controlPoint1: NSPoint(x: 4.4, y: 12), controlPoint2: NSPoint(x: 4, y: 11.4))
+        stroke.line(to: NSPoint(x: 4, y: 4))
+        stroke.curve(to: NSPoint(x: 6, y: 2), controlPoint1: NSPoint(x: 4, y: 2.8), controlPoint2: NSPoint(x: 4.8, y: 2))
+        stroke.line(to: NSPoint(x: 12, y: 2))
+        stroke.curve(to: NSPoint(x: 14, y: 4), controlPoint1: NSPoint(x: 13.2, y: 2), controlPoint2: NSPoint(x: 14, y: 2.8))
+        stroke.line(to: NSPoint(x: 14, y: 10))
+        stroke.curve(to: NSPoint(x: 13, y: 12), controlPoint1: NSPoint(x: 14, y: 11.4), controlPoint2: NSPoint(x: 13.6, y: 12))
+        stroke.stroke()
 
-    @objc private func togglePauseAction() {
-        monitor.paused.toggle()
-        pauseItem.state = monitor.paused ? .on : .off
+        let lines = NSBezierPath()
+        lines.lineWidth = 1.3
+        lines.lineCapStyle = .round
+        lines.move(to: NSPoint(x: 7, y: 9))
+        lines.line(to: NSPoint(x: 11, y: 9))
+        lines.move(to: NSPoint(x: 7, y: 6))
+        lines.line(to: NSPoint(x: 10, y: 6))
+        lines.stroke()
+        image.unlockFocus()
+        image.isTemplate = true
+        return image
     }
 
-    @objc private func toggleStartupAction() {
-        let next = !(startupItem.state == .on)
-        LoginItem.setEnabled(next)
-        startupItem.state = LoginItem.isEnabled ? .on : .off
+    @objc private func openSettingsAction() { showSettings() }
+    @objc private func quitAction() { NSApp.terminate(nil) }
+    @objc private func shotRegionAction() { captureScreenshot(.region) }
+    @objc private func shotWindowAction() { captureScreenshot(.window) }
+    @objc private func shotFullAction() { captureScreenshot(.fullscreen) }
+
+    private func captureScreenshot(_ mode: Screenshot.Mode) {
+        pendingScreenshotPreview = true
+        pendingScreenshotPreviewUntil = Date().addingTimeInterval(120)
+        Screenshot.capture(mode)
     }
 
     @objc private func checkUpdateAction() {
@@ -441,6 +418,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         guard ensureUnlocked() else { return }
         if passwordsWC == nil { passwordsWC = WindowFactory.make(title: "密码", width: 440, height: 360, root: PasswordsView(vault: vault)) }
         activate(passwordsWC)
+    }
+
+    private func showScreenshotPreview(data: Data) {
+        screenshotPreviewWC?.close()
+        screenshotPreviewWC = WindowFactory.make(
+            title: "截图预览",
+            width: 760,
+            height: 560,
+            root: ScreenshotPreviewView(data: data))
+        activate(screenshotPreviewWC)
     }
 
     private func activate(_ wc: NSWindowController?) {

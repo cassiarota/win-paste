@@ -508,7 +508,6 @@ public partial class PopupWindow : Window
                 "pasteplain" => Vis(type == ClipItemType.Text || type == ClipItemType.Files),
                 "edit" => Vis(isText),
                 "transform" => Vis(isText),
-                "stack" => Vis(isClip),
                 "movelist" => Vis(isClip),
                 "copy" => Vis(isClip),
                 "openurl" => Vis(isText && LooksLikeUrl(vm?.PasteText)),
@@ -599,14 +598,6 @@ public partial class PopupWindow : Window
         {
             Hide();
             _app.CopyItem(vm.Item);
-        }
-    }
-
-    private void MenuAddToStack_Click(object sender, RoutedEventArgs e)
-    {
-        if (ItemsList.SelectedItem is PopupItemVm vm && vm.Item != null)
-        {
-            _app.AddToPasteStack(vm.Item);
         }
     }
 

@@ -12,22 +12,17 @@ namespace FineClipboard;
 
 public partial class App : Application
 {
-    // Hotkey ids (mirror PasteNow): popup history + paste-recent-as-plain-text + paste-next-from-stack.
+    // Hotkey ids: popup history + paste-recent-as-plain-text + screenshot.
     private const int HotkeyPopup = 1;
     private const int HotkeyPlain = 2;
-    private const int HotkeyStack = 3;
     private const int HotkeyShot = 4;
     private const uint VkV = 0x56;
     private const uint VkB = 0x42;
-    private const uint VkX = 0x58;
     private const uint VkA = 0x41;
 
     private static readonly HotkeyCombo DefaultPopup = new(NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, VkV);
     private static readonly HotkeyCombo DefaultPlain = new(NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, VkB);
-    private static readonly HotkeyCombo DefaultStack = new(NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, VkX);
     private static readonly HotkeyCombo DefaultShot = new(NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, VkA);
-
-    private readonly PasteStack _pasteStack = new();
 
     private Mutex? _singleInstance;
 
@@ -45,11 +40,7 @@ public partial class App : Application
     internal PasswordVault Vault => _vault;
 
     private System.Windows.Forms.NotifyIcon _tray = null!;
-    private System.Windows.Forms.ToolStripMenuItem _openMenuItem = null!;
-    private System.Windows.Forms.ToolStripMenuItem _pauseMenuItem = null!;
-    private System.Windows.Forms.ToolStripMenuItem _startupMenuItem = null!;
     private System.Windows.Forms.ToolStripMenuItem _updateMenuItem = null!;
-    private System.Windows.Forms.ToolStripMenuItem _stackMenuItem = null!;
     private System.Drawing.Icon? _trayIcon;
 
     private System.Windows.Threading.DispatcherTimer? _purgeTimer;
@@ -59,7 +50,10 @@ public partial class App : Application
 
     private PopupWindow? _popup;
     private SettingsWindow? _settings;
+    private ScreenshotPreviewWindow? _screenshotPreview;
     private IntPtr _lastForeground;
+    private bool _pendingScreenshotPreview;
+    private DateTime _pendingScreenshotPreviewUntil;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -219,6 +213,17 @@ public partial class App : Application
             });
         }
 
+        if (_pendingScreenshotPreview && DateTime.UtcNow > _pendingScreenshotPreviewUntil)
+        {
+            _pendingScreenshotPreview = false;
+        }
+
+        if (_pendingScreenshotPreview && item.Type == ClipItemType.Image && item.ImageData is { Length: > 0 } previewPng)
+        {
+            _pendingScreenshotPreview = false;
+            ShowScreenshotPreview(previewPng);
+        }
+
         if (_store.GetSetting(HistoryStore.SoundEnabledKey) == "1")
         {
             System.Media.SystemSounds.Asterisk.Play();
@@ -230,26 +235,16 @@ public partial class App : Application
         }
     }
 
-    /// <summary>
-    /// Re-registers both global hotkeys from the saved (or default) combinations and updates
-    /// the tray label. Returns whether each one registered successfully.
-    /// </summary>
+    /// <summary>Re-registers global hotkeys and returns whether editable hotkeys registered successfully.</summary>
     internal (bool popupOk, bool plainOk) ReloadHotkeys()
     {
         _hotkeys.UnregisterAll();
         HotkeyCombo popup = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPopupKey), DefaultPopup);
         HotkeyCombo plain = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPlainKey), DefaultPlain);
-        HotkeyCombo stack = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyStackKey), DefaultStack);
         HotkeyCombo shot = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyShotKey), DefaultShot);
         bool popupOk = _hotkeys.Register(HotkeyPopup, popup.Modifiers, popup.VirtualKey);
         bool plainOk = _hotkeys.Register(HotkeyPlain, plain.Modifiers, plain.VirtualKey);
-        _hotkeys.Register(HotkeyStack, stack.Modifiers, stack.VirtualKey);
         _hotkeys.Register(HotkeyShot, shot.Modifiers, shot.VirtualKey);
-
-        if (_openMenuItem != null)
-        {
-            _openMenuItem.Text = $"打开历史 ({popup.ToDisplayString()})";
-        }
         return (popupOk, plainOk);
     }
 
@@ -290,41 +285,42 @@ public partial class App : Application
             case HotkeyPlain:
                 _ = _paste.PasteRecentPlainAsync();
                 break;
-            case HotkeyStack:
-                PasteNextFromStack();
-                break;
             case HotkeyShot:
-                ScreenshotService.CaptureInteractive();
+                CaptureInteractiveScreenshot();
                 break;
         }
     }
 
-    /// <summary>Adds an item to the paste stack (called from the popup) and refreshes the tray label.</summary>
-    internal void AddToPasteStack(ClipboardItem item)
+    internal string ScreenshotHotkeyDisplay()
     {
-        _pasteStack.Enqueue(item);
-        UpdateStackMenu();
+        HotkeyCombo shot = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyShotKey), DefaultShot);
+        return shot.ToDisplayString();
     }
 
-    /// <summary>Pastes the next stacked item into the current foreground window (FIFO), then advances.</summary>
-    private void PasteNextFromStack()
+    internal bool IsRecordingPaused => _monitor.Paused;
+
+    internal void SetRecordingPaused(bool paused)
     {
-        ClipboardItem? next = _pasteStack.Dequeue();
-        UpdateStackMenu();
-        if (next != null)
-        {
-            _ = _paste.PasteItemAsync(next, NativeMethods.GetForegroundWindow(), plainText: false);
-        }
+        _monitor.Paused = paused;
+        _tray.Text = paused ? "FineClipboard(已暂停记录)" : "FineClipboard";
     }
 
-    private void UpdateStackMenu()
+    internal void ShowSyncSettings() => ShowSyncWindow();
+
+    internal void LockVault() => _vault.Lock();
+
+    internal void CaptureInteractiveScreenshot()
     {
-        if (_stackMenuItem != null)
-        {
-            int n = _pasteStack.Count;
-            _stackMenuItem.Text = $"粘贴堆栈:{n} 项";
-            _stackMenuItem.Enabled = n > 0;
-        }
+        _pendingScreenshotPreview = true;
+        _pendingScreenshotPreviewUntil = DateTime.UtcNow.AddMinutes(2);
+        ScreenshotService.CaptureInteractive();
+    }
+
+    internal void CaptureFullscreenScreenshot()
+    {
+        _pendingScreenshotPreview = true;
+        _pendingScreenshotPreviewUntil = DateTime.UtcNow.AddMinutes(2);
+        ScreenshotService.CaptureFullscreen();
     }
 
     private void PurgeExpiredNow()
@@ -406,6 +402,15 @@ public partial class App : Application
         }
     }
 
+    private void ShowScreenshotPreview(byte[] png)
+    {
+        _screenshotPreview?.Close();
+        _screenshotPreview = new ScreenshotPreviewWindow(png);
+        _screenshotPreview.Closed += (_, _) => _screenshotPreview = null;
+        _screenshotPreview.Show();
+        _screenshotPreview.Activate();
+    }
+
     private void SetupTray()
     {
         _trayIcon = TrayIconFactory.Create();
@@ -425,47 +430,18 @@ public partial class App : Application
             }
         };
 
-        var menu = new System.Windows.Forms.ContextMenuStrip();
-
-        HotkeyCombo popupCombo = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPopupKey), DefaultPopup);
-        _openMenuItem = new System.Windows.Forms.ToolStripMenuItem(
-            $"打开历史 ({popupCombo.ToDisplayString()})", null, (_, _) => ShowPopup());
-        menu.Items.Add(_openMenuItem);
+        var menu = new System.Windows.Forms.ContextMenuStrip
+        {
+            Renderer = new TrayMenuRenderer(),
+        };
 
         menu.Items.Add("设置…", null, (_, _) => ShowSettings());
-        menu.Items.Add("云同步…", null, (_, _) => ShowSyncWindow());
-
-        _pauseMenuItem = new System.Windows.Forms.ToolStripMenuItem("暂停记录(隐私模式)") { CheckOnClick = true };
-        _pauseMenuItem.CheckedChanged += (_, _) =>
-        {
-            _monitor.Paused = _pauseMenuItem.Checked;
-            _tray.Text = _pauseMenuItem.Checked ? "FineClipboard(已暂停记录)" : "FineClipboard";
-        };
-        menu.Items.Add(_pauseMenuItem);
-        menu.Items.Add("锁定密码", null, (_, _) => _vault.Lock());
-
-        HotkeyCombo stackCombo = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyStackKey), DefaultStack);
-        _stackMenuItem = new System.Windows.Forms.ToolStripMenuItem("粘贴堆栈:0 项") { Enabled = false };
-        menu.Items.Add(_stackMenuItem);
-        menu.Items.Add($"清空粘贴堆栈 (粘贴下一项 {stackCombo.ToDisplayString()})", null, (_, _) =>
-        {
-            _pasteStack.Clear();
-            UpdateStackMenu();
-        });
 
         HotkeyCombo shotCombo = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyShotKey), DefaultShot);
         var shotMenu = new System.Windows.Forms.ToolStripMenuItem("截图");
-        shotMenu.DropDownItems.Add($"截取区域 / 窗口 ({shotCombo.ToDisplayString()})", null, (_, _) => ScreenshotService.CaptureInteractive());
-        shotMenu.DropDownItems.Add("全屏截图", null, (_, _) => ScreenshotService.CaptureFullscreen());
+        shotMenu.DropDownItems.Add($"截取区域 / 窗口 ({shotCombo.ToDisplayString()})", null, (_, _) => CaptureInteractiveScreenshot());
+        shotMenu.DropDownItems.Add("全屏截图", null, (_, _) => CaptureFullscreenScreenshot());
         menu.Items.Add(shotMenu);
-
-        _startupMenuItem = new System.Windows.Forms.ToolStripMenuItem("开机自启")
-        {
-            CheckOnClick = true,
-            Checked = StartupManager.IsEnabled(),
-        };
-        _startupMenuItem.CheckedChanged += (_, _) => StartupManager.SetEnabled(_startupMenuItem.Checked);
-        menu.Items.Add(_startupMenuItem);
 
         _updateMenuItem = new System.Windows.Forms.ToolStripMenuItem("检查更新…", null, (_, _) => OnUpdateMenuClick());
         menu.Items.Add(_updateMenuItem);
@@ -474,6 +450,24 @@ public partial class App : Application
         menu.Items.Add("退出", null, (_, _) => Shutdown());
 
         _tray.ContextMenuStrip = menu;
+    }
+
+    private sealed class TrayMenuRenderer : System.Windows.Forms.ToolStripProfessionalRenderer
+    {
+        public TrayMenuRenderer() : base(new TrayMenuColors()) { }
+    }
+
+    private sealed class TrayMenuColors : System.Windows.Forms.ProfessionalColorTable
+    {
+        public override System.Drawing.Color ToolStripDropDownBackground => System.Drawing.Color.FromArgb(245, 248, 252);
+        public override System.Drawing.Color ImageMarginGradientBegin => ToolStripDropDownBackground;
+        public override System.Drawing.Color ImageMarginGradientMiddle => ToolStripDropDownBackground;
+        public override System.Drawing.Color ImageMarginGradientEnd => ToolStripDropDownBackground;
+        public override System.Drawing.Color MenuItemSelected => System.Drawing.Color.FromArgb(224, 238, 255);
+        public override System.Drawing.Color MenuItemBorder => System.Drawing.Color.FromArgb(137, 184, 255);
+        public override System.Drawing.Color MenuBorder => System.Drawing.Color.FromArgb(195, 207, 224);
+        public override System.Drawing.Color SeparatorDark => System.Drawing.Color.FromArgb(218, 226, 237);
+        public override System.Drawing.Color SeparatorLight => System.Drawing.Color.White;
     }
 
     protected override void OnExit(ExitEventArgs e)
