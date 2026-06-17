@@ -12,6 +12,7 @@ public partial class SettingsWindow : Window
 {
     private static readonly HotkeyCombo DefaultPopup = new(NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, 0x56);
     private static readonly HotkeyCombo DefaultPlain = new(NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, 0x42);
+    private static readonly HotkeyCombo DefaultShot = new(NativeMethods.MOD_CONTROL | NativeMethods.MOD_SHIFT, 0x41);
 
     private readonly HistoryStore _store;
     private readonly App _app;
@@ -40,7 +41,6 @@ public partial class SettingsWindow : Window
         SelectByTag(ThemeCombo, _store.GetSetting(HistoryStore.ThemeKey) ?? "system");
         SelectByTag(PopupSizeCombo, _store.GetSetting(HistoryStore.PopupSizeKey) ?? "medium");
         MasterPwButton.Content = _app.Vault.IsConfigured ? "修改主密码…" : "设置主密码…";
-        ShotHotkeyText.Text = _app.ScreenshotHotkeyDisplay();
         LoadHotkeyDisplay();
         RefreshCount();
         _initializing = false;
@@ -83,13 +83,15 @@ public partial class SettingsWindow : Window
 
     private void PlainHotkeyButton_Click(object sender, RoutedEventArgs e) => StartRecording("plain");
 
+    private void ShotHotkeyButton_Click(object sender, RoutedEventArgs e) => StartRecording("shot");
+
     private void StartRecording(string target)
     {
         LoadHotkeyDisplay(); // clear any stale "按下快捷键…" on the other button
         _recordingTarget = target;
         // Suspend global hotkeys so their own combos reach this window and can be re-recorded.
         _app.SuspendHotkeys();
-        (target == "popup" ? PopupHotkeyButton : PlainHotkeyButton).Content = "按下快捷键…";
+        ButtonFor(target).Content = "按下快捷键…";
     }
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
@@ -126,11 +128,11 @@ public partial class SettingsWindow : Window
             return; // require at least one modifier; keep waiting
         }
 
-        bool isPopup = _recordingTarget == "popup";
+        string target = _recordingTarget;
         _recordingTarget = null;
 
         var combo = new HotkeyCombo(mods, (uint)KeyInterop.VirtualKeyFromKey(key));
-        bool ok = _app.TrySetHotkey(isPopup, combo);
+        bool ok = _app.TrySetHotkey(target, combo);
         LoadHotkeyDisplay();
 
         if (!ok)
@@ -145,9 +147,18 @@ public partial class SettingsWindow : Window
     {
         HotkeyCombo popup = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPopupKey), DefaultPopup);
         HotkeyCombo plain = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPlainKey), DefaultPlain);
+        HotkeyCombo shot = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyShotKey), DefaultShot);
         PopupHotkeyButton.Content = popup.ToDisplayString();
         PlainHotkeyButton.Content = plain.ToDisplayString();
+        ShotHotkeyButton.Content = shot.ToDisplayString();
     }
+
+    private Button ButtonFor(string target) => target switch
+    {
+        "popup" => PopupHotkeyButton,
+        "plain" => PlainHotkeyButton,
+        _ => ShotHotkeyButton,
+    };
 
     private static bool IsModifierKey(Key key) => key is
         Key.LeftCtrl or Key.RightCtrl or
@@ -218,16 +229,6 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void ManageSnippets_Click(object sender, RoutedEventArgs e)
-    {
-        new SnippetsWindow(_store) { Owner = this }.ShowDialog();
-    }
-
-    private void ManageLists_Click(object sender, RoutedEventArgs e)
-    {
-        new ListsWindow(_store) { Owner = this }.ShowDialog();
-    }
-
     private void OpenSync_Click(object sender, RoutedEventArgs e) => _app.ShowSyncSettings();
 
     // ---- Password protection ----
@@ -239,30 +240,6 @@ public partial class SettingsWindow : Window
             MasterPwButton.Content = "修改主密码…";
         }
     }
-
-    private void ManagePasswords_Click(object sender, RoutedEventArgs e)
-    {
-        if (!_app.Vault.IsConfigured)
-        {
-            MessageBox.Show("请先设置主密码。", "FineClipboard", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-        while (!_app.Vault.IsUnlocked)
-        {
-            var dialog = new MasterPasswordDialog("解锁密码", "输入主密码以管理密码:") { Owner = this };
-            if (dialog.ShowDialog() != true)
-            {
-                return;
-            }
-            if (!_app.Vault.Unlock(dialog.Password))
-            {
-                MessageBox.Show("主密码不正确。", "FineClipboard", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
-        }
-        new PasswordsWindow(_app.Vault) { Owner = this }.ShowDialog();
-    }
-
-    private void LockPasswords_Click(object sender, RoutedEventArgs e) => _app.LockVault();
 
     private void SaveTag(ComboBox combo, string settingKey)
     {
@@ -292,26 +269,4 @@ public partial class SettingsWindow : Window
     // ---- History management ----
     private void StartupCheck_Click(object sender, RoutedEventArgs e) =>
         StartupManager.SetEnabled(StartupCheck.IsChecked == true);
-
-    private void ClearKeepPinned_Click(object sender, RoutedEventArgs e)
-    {
-        if (Confirm("确定清空历史吗?(置顶项会保留)"))
-        {
-            _store.Clear(keepPinned: true);
-            RefreshCount();
-        }
-    }
-
-    private void ClearAll_Click(object sender, RoutedEventArgs e)
-    {
-        if (Confirm("确定清空全部历史吗?(包括置顶项,不可恢复)"))
-        {
-            _store.Clear(keepPinned: false);
-            RefreshCount();
-        }
-    }
-
-    private static bool Confirm(string message) =>
-        MessageBox.Show(message, "FineClipboard", MessageBoxButton.OKCancel, MessageBoxImage.Question)
-            == MessageBoxResult.OK;
 }

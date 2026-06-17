@@ -6,12 +6,10 @@ struct PopupView: View {
     @FocusState private var searchFocused: Bool
 
     private var tabs: [(tab: PopupTab, title: String)] {
-        var t: [(PopupTab, String)] = [
+        [
             (.all, "全部"), (.text, "文本"), (.image, "图片"), (.files, "文件"),
-            (.pinned, "置顶"), (.snippets, "片段"), (.passwords, "密码"),
+            (.pinned, "收藏"), (.passwords, "密码"),
         ]
-        for l in model.lists { t.append((.list(l.id), l.name)) }
-        return t
     }
 
     var body: some View {
@@ -24,7 +22,7 @@ struct PopupView: View {
                     .focused($searchFocused)
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            .background(.white.opacity(0.12))
             .padding(.horizontal, 10)
             .padding(.top, 10)
 
@@ -38,7 +36,6 @@ struct PopupView: View {
                             .padding(.horizontal, 10).padding(.vertical, 4)
                             .background(isSel ? Color.accentColor.opacity(0.88) : Color.secondary.opacity(0.12))
                             .foregroundColor(isSel ? .white : .primary)
-                            .clipShape(Capsule())
                             .onTapGesture { model.select(tab: entry.tab) }
                     }
                 }
@@ -98,14 +95,14 @@ struct PopupView: View {
             if let b = row.badge {
                 Text("\(b)").font(.system(size: 10, weight: .semibold))
                     .frame(width: 16, height: 16)
-                    .background(Color.secondary.opacity(0.18)).clipShape(Circle())
+                    .background(Color.secondary.opacity(0.18))
                     .foregroundColor(.secondary)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSel ? Color.accentColor.opacity(0.20) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(isSel ? Color.accentColor.opacity(0.28) : Color.white.opacity(0.10)))
+        .background(isSel ? Color.accentColor.opacity(0.20) : Color.white.opacity(0.08))
+        .overlay(Rectangle().stroke(isSel ? Color.accentColor.opacity(0.28) : Color.white.opacity(0.10)))
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .contentShape(Rectangle())
@@ -119,12 +116,12 @@ struct PopupView: View {
     private func thumbnail(_ row: PopupRow) -> some View {
         if let data = row.item?.data, row.item?.kind == .image, let img = NSImage(data: data) {
             Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
-                .frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(width: 30, height: 30).clipped()
         } else {
             Image(systemName: row.symbol)
                 .foregroundColor(.secondary)
                 .frame(width: 30, height: 30)
-                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+                .background(Color.secondary.opacity(0.10))
         }
     }
 
@@ -165,18 +162,10 @@ struct PopupView: View {
                 Button("图片另存为…") { model.host?.saveImage(item: item) }
             }
             Divider()
-            Button(item.pinned ? "取消置顶" : "置顶") { model.host?.setPinned(item, !item.pinned) }
-            Menu("移到列表") {
-                Button("无(移出列表)") { model.host?.moveToList(item: item, listId: nil) }
-                ForEach(model.lists) { l in
-                    Button(l.name) { model.host?.moveToList(item: item, listId: l.id) }
-                }
-                Divider()
-                Button("新建列表并加入…") { model.host?.newListAndAdd(item: item) }
-            }
+            Button(item.pinned ? "取消收藏" : "收藏") { model.host?.setPinned(item, !item.pinned) }
             Button("删除") { model.host?.delete(item: item) }
-        } else if let s = row.snippet {
-            Button("粘贴") { model.host?.pasteSnippet(s) }
+            Divider()
+            Button("清空历史(保留收藏)") { model.host?.clearHistoryKeepingFavorites() }
         } else if let p = row.password {
             Button("粘贴(需主密码)") { model.host?.pastePassword(p) }
         }

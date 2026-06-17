@@ -22,9 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
     private var purgeTimer: Timer?
 
     private var settingsWC: NSWindowController?
-    private var snippetsWC: NSWindowController?
-    private var listsWC: NSWindowController?
-    private var passwordsWC: NSWindowController?
     private var screenshotPreviewWC: NSWindowController?
 
     private static let popupHotkeyID: UInt32 = 1
@@ -146,15 +143,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
     }
 
     @discardableResult
-    private func reloadHotkeysInternal() -> (Bool, Bool) {
+    private func reloadHotkeysInternal() -> (Bool, Bool, Bool) {
         HotkeyManager.shared.unregisterAll()
         let popupCombo = HotkeyCombo.parse(store.setting(Store.hotkeyPopupKey), default: .defaultPopup)
         let plainCombo = HotkeyCombo.parse(store.setting(Store.hotkeyPlainKey), default: .defaultPlain)
         let shotCombo = HotkeyCombo.parse(store.setting(Store.hotkeyShotKey), default: .defaultShot)
         let a = HotkeyManager.shared.register(id: Self.popupHotkeyID, combo: popupCombo) { [weak self] in self?.showPopup() }
         let b = HotkeyManager.shared.register(id: Self.plainHotkeyID, combo: plainCombo) { [weak self] in self?.pasteRecentPlain() }
-        _ = HotkeyManager.shared.register(id: Self.shotHotkeyID, combo: shotCombo) { [weak self] in self?.captureScreenshot(.region) }
-        return (a, b)
+        let c = HotkeyManager.shared.register(id: Self.shotHotkeyID, combo: shotCombo) { [weak self] in self?.captureScreenshot(.region) }
+        return (a, b, c)
     }
 
     func reloadHotkeys() { _ = reloadHotkeysInternal() }
@@ -162,11 +159,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
     func resumeHotkeys() { reloadHotkeys() }
 
     func trySetHotkey(popup isPopup: Bool, combo: HotkeyCombo) -> Bool {
-        let key = isPopup ? Store.hotkeyPopupKey : Store.hotkeyPlainKey
-        let prev = store.setting(key) ?? (isPopup ? HotkeyCombo.defaultPopup : .defaultPlain).serialize()
+        trySetHotkey(target: isPopup ? "popup" : "plain", combo: combo)
+    }
+
+    func trySetHotkey(target: String, combo: HotkeyCombo) -> Bool {
+        let key: String
+        let def: HotkeyCombo
+        switch target {
+        case "popup": key = Store.hotkeyPopupKey; def = .defaultPopup
+        case "plain": key = Store.hotkeyPlainKey; def = .defaultPlain
+        case "shot": key = Store.hotkeyShotKey; def = .defaultShot
+        default: return false
+        }
+        let prev = store.setting(key) ?? def.serialize()
         store.setSetting(key, combo.serialize())
-        let (a, b) = reloadHotkeysInternal()
-        if a && b { return true }
+        let (a, b, c) = reloadHotkeysInternal()
+        if a && b && c { return true }
         store.setSetting(key, prev)
         reloadHotkeysInternal()
         return false
@@ -228,6 +236,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
 
     func setPinned(_ item: ClipItem, _ pinned: Bool) { store.setPinned(item.id, pinned); popup.model.reload() }
     func delete(item: ClipItem) { store.delete(item.id); popup.model.reload() }
+    func clearHistoryKeepingFavorites() {
+        if Prompt.confirm("确定清空历史吗?", "收藏项会保留。") {
+            store.clear(keepPinned: true)
+            popup.model.reload()
+        }
+    }
     func moveToList(item: ClipItem, listId: Int64?) { store.assignToList(item.id, listId: listId); popup.model.reload() }
 
     func newListAndAdd(item: ClipItem) {
@@ -393,31 +407,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         if settingsWC == nil {
             let view = SettingsView(
                 host: self,
-                onManageSnippets: { [weak self] in self?.showSnippets() },
-                onManageLists: { [weak self] in self?.showLists() },
-                onManagePasswords: { [weak self] in self?.showPasswords() },
                 onMasterPassword: { [weak self] in self?.setOrChangeMaster() },
                 masterTitle: { [weak self] in (self?.vault.isConfigured ?? false) ? "修改主密码…" : "设置主密码…" },
                 model: SettingsModel(host: self))
             settingsWC = WindowFactory.make(title: "FineClipboard 设置", width: 480, height: 640, root: view)
         }
         activate(settingsWC)
-    }
-
-    private func showSnippets() {
-        if snippetsWC == nil { snippetsWC = WindowFactory.make(title: "常用片段", width: 420, height: 360, root: SnippetsView(store: store)) }
-        activate(snippetsWC)
-    }
-
-    private func showLists() {
-        if listsWC == nil { listsWC = WindowFactory.make(title: "列表", width: 380, height: 320, root: ListsView(store: store)) }
-        activate(listsWC)
-    }
-
-    private func showPasswords() {
-        guard ensureUnlocked() else { return }
-        if passwordsWC == nil { passwordsWC = WindowFactory.make(title: "密码", width: 440, height: 360, root: PasswordsView(vault: vault)) }
-        activate(passwordsWC)
     }
 
     private func showScreenshotPreview(data: Data) {

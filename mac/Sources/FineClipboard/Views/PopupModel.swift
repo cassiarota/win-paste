@@ -20,10 +20,9 @@ enum TextTransform: String, CaseIterable {
     }
 }
 
-/// A tab in the popup. The first seven are fixed; user lists are appended.
+/// A tab in the popup. "pinned" is kept as the storage field, but shown as favorites.
 enum PopupTab: Hashable {
-    case all, text, image, files, pinned, snippets, passwords
-    case list(Int64)
+    case all, text, image, files, pinned, passwords
 
     var title: String {
         switch self {
@@ -31,10 +30,8 @@ enum PopupTab: Hashable {
         case .text: return "文本"
         case .image: return "图片"
         case .files: return "文件"
-        case .pinned: return "置顶"
-        case .snippets: return "片段"
+        case .pinned: return "收藏"
         case .passwords: return "密码"
-        case .list: return ""
         }
     }
 }
@@ -58,17 +55,15 @@ struct PopupRow: Identifiable {
 protocol PopupHost: AnyObject {
     func paste(item: ClipItem, plain: Bool)
     func copy(item: ClipItem)
-    func pasteSnippet(_ s: Snippet)
     func pastePassword(_ entry: PasswordEntry)
     func setPinned(_ item: ClipItem, _ pinned: Bool)
     func delete(item: ClipItem)
+    func clearHistoryKeepingFavorites()
     func editAndPaste(item: ClipItem)
     func transformAndPaste(item: ClipItem, transform: TextTransform)
     func openLink(item: ClipItem)
     func revealFile(item: ClipItem)
     func saveImage(item: ClipItem)
-    func moveToList(item: ClipItem, listId: Int64?)
-    func newListAndAdd(item: ClipItem)
     func closePopup()
 }
 
@@ -79,7 +74,6 @@ final class PopupModel: ObservableObject {
     @Published var selected = 0
     @Published var search = "" { didSet { applyFilter() } }
     @Published var tab: PopupTab = .all
-    @Published var lists: [ClipList] = []
 
     let store: Store
     let vault: Vault
@@ -91,7 +85,6 @@ final class PopupModel: ObservableObject {
     }
 
     func reload() {
-        lists = store.lists()
         applyFilter()
     }
 
@@ -108,10 +101,6 @@ final class PopupModel: ObservableObject {
         var built: [PopupRow] = []
 
         switch tab {
-        case .snippets:
-            built = store.snippets()
-                .filter { term.isEmpty || $0.name.localizedCaseInsensitiveContains(term) || $0.content.localizedCaseInsensitiveContains(term) }
-                .map { PopupRow(id: "snip-\($0.id)", title: $0.name, detail: ClipboardMonitor.preview($0.content), symbol: "text.badge.star", payload: .snippet($0)) }
         case .passwords:
             built = vault.entries()
                 .filter { term.isEmpty || $0.name.localizedCaseInsensitiveContains(term) }
@@ -142,7 +131,6 @@ final class PopupModel: ObservableObject {
         case .image: return store.itemsByKind(.image, limit: cap())
         case .files: return store.itemsByKind(.files, limit: cap())
         case .pinned: return store.pinnedItems()
-        case .list(let id): return store.itemsByList(id)
         default: return []
         }
     }
@@ -154,7 +142,6 @@ final class PopupModel: ObservableObject {
         case .image: return items.filter { $0.kind == .image }
         case .files: return items.filter { $0.kind == .files }
         case .pinned: return items.filter { $0.pinned }
-        case .list(let id): return items.filter { $0.listId == id }
         default: return items
         }
     }
@@ -166,7 +153,7 @@ final class PopupModel: ObservableObject {
         case .image: symbol = "photo"
         case .files: symbol = "folder"
         }
-        let detail = i.pinned ? "📌 " + (i.source ?? "") : (i.source ?? "")
+        let detail = i.pinned ? "★ " + (i.source ?? "") : (i.source ?? "")
         return PopupRow(id: "item-\(i.id)", title: i.preview, detail: detail, symbol: symbol, payload: .item(i))
     }
 
@@ -185,7 +172,7 @@ final class PopupModel: ObservableObject {
     func activate(_ row: PopupRow, plain: Bool) {
         switch row.payload {
         case .item(let i): host?.paste(item: i, plain: plain)
-        case .snippet(let s): host?.pasteSnippet(s)
+        case .snippet: break
         case .password(let p): host?.pastePassword(p)
         }
     }

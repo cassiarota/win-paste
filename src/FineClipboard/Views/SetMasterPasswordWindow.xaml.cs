@@ -11,6 +11,7 @@ public partial class SetMasterPasswordWindow : Window
     {
         InitializeComponent();
         _vault = vault;
+        Icon = AppIconFactory.CreateImageSource();
 
         if (vault.IsConfigured)
         {

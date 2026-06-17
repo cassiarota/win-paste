@@ -5,7 +5,8 @@ final class SettingsModel: ObservableObject {
     let host: AppControl
     @Published var popupLabel = ""
     @Published var plainLabel = ""
-    @Published var recording: String?   // "popup" / "plain" while capturing
+    @Published var shotLabel = ""
+    @Published var recording: String?   // "popup" / "plain" / "shot" while capturing
     private var monitor: Any?
 
     init(host: AppControl) { self.host = host; loadLabels() }
@@ -13,6 +14,7 @@ final class SettingsModel: ObservableObject {
     func loadLabels() {
         popupLabel = HotkeyCombo.parse(host.store.setting(Store.hotkeyPopupKey), default: .defaultPopup).display()
         plainLabel = HotkeyCombo.parse(host.store.setting(Store.hotkeyPlainKey), default: .defaultPlain).display()
+        shotLabel = HotkeyCombo.parse(host.store.setting(Store.hotkeyShotKey), default: .defaultShot).display()
     }
 
     func startRecording(_ target: String) {
@@ -27,8 +29,8 @@ final class SettingsModel: ObservableObject {
     private func captured(_ event: NSEvent) {
         if event.keyCode == 53 { cancel(); return }                  // Esc
         guard let combo = HotkeyCombo.from(event: event) else { return } // need a modifier; keep waiting
-        let isPopup = recording == "popup"
-        let ok = host.trySetHotkey(popup: isPopup, combo: combo)
+        let target = recording ?? "popup"
+        let ok = host.trySetHotkey(target: target, combo: combo)
         stopMonitor()
         recording = nil
         loadLabels()
@@ -49,15 +51,16 @@ final class SettingsModel: ObservableObject {
 
     func label(for target: String) -> String {
         if recording == target { return "按下快捷键…" }
-        return target == "popup" ? popupLabel : plainLabel
+        switch target {
+        case "popup": return popupLabel
+        case "plain": return plainLabel
+        default: return shotLabel
+        }
     }
 }
 
 struct SettingsView: View {
     let host: AppControl
-    let onManageSnippets: () -> Void
-    let onManageLists: () -> Void
-    let onManagePasswords: () -> Void
     let onMasterPassword: () -> Void
     let masterTitle: () -> String
     @StateObject var model: SettingsModel
@@ -89,7 +92,7 @@ struct SettingsView: View {
                 section("历史与隐私") {
                     Toggle("暂停记录(隐私模式)", isOn: $paused)
                         .onChange(of: paused) { host.setRecordingPaused($0) }
-                    labeled("最多保留(非置顶记录)") {
+                    labeled("最多保留(非收藏记录)") {
                         Picker("", selection: $maxItems) {
                             Text("200 条").tag("200"); Text("500 条").tag("500")
                             Text("1000 条").tag("1000"); Text("5000 条").tag("5000")
@@ -119,8 +122,11 @@ struct SettingsView: View {
                         .font(.system(size: 12))
                         .frame(height: 72)
                         .scrollContentBackground(.hidden)
-                        .background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+                        .background(.white.opacity(0.14))
                         .onChange(of: exclusions) { store.setSetting(Store.exclusionsKey, $0) }
+                    Text("已保存 \(count) 条历史记录")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
 
                 section("外观") {
@@ -159,10 +165,7 @@ struct SettingsView: View {
                         }
                         GridRow {
                             Text("截图")
-                            Text(host.screenshotHotkeyDisplay())
-                                .frame(width: 170)
-                                .padding(.vertical, 6)
-                                .background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 9))
+                            Button(model.label(for: "shot")) { model.startRecording("shot") }.frame(width: 170)
                         }
                     }
                 }
@@ -180,29 +183,6 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                     HStack {
                         Button(masterTitle(), action: onMasterPassword)
-                        Button("管理密码…", action: onManagePasswords)
-                        Button("锁定密码") { host.lockVault() }
-                    }
-                }
-
-                section("维护") {
-                    Text("已保存 \(count) 条历史记录")
-                        .foregroundColor(.secondary)
-                    HStack {
-                        Button("管理常用片段…", action: onManageSnippets)
-                        Button("管理列表…", action: onManageLists)
-                    }
-                    HStack {
-                        Button("清空历史(保留置顶)") {
-                            if Prompt.confirm("确定清空历史吗?", "置顶项会保留。") {
-                                store.clear(keepPinned: true); count = store.count()
-                            }
-                        }
-                        Button("全部清空") {
-                            if Prompt.confirm("确定清空全部历史吗?", "包括置顶项,不可恢复。") {
-                                store.clear(keepPinned: false); count = store.count()
-                            }
-                        }
                     }
                 }
 
@@ -224,7 +204,7 @@ struct SettingsView: View {
                 .font(.system(size: 34, weight: .semibold))
                 .foregroundStyle(.blue)
                 .frame(width: 44, height: 44)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .background(.thinMaterial)
             VStack(alignment: .leading, spacing: 2) {
                 Text("FineClipboard").font(.title2.weight(.semibold))
                 Text("版本 \(AppInfo.version)").font(.caption).foregroundColor(.secondary)
@@ -253,8 +233,8 @@ struct SettingsView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.18)))
+        .background(.thinMaterial)
+        .overlay(Rectangle().stroke(.white.opacity(0.18)))
     }
 
     private func labeled<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {

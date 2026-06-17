@@ -20,7 +20,7 @@
         <SolidColorBrush x:Key="BorderBrush" Color="#78FFFFFF" />
 
         <Style x:Key="GlassSection" TargetType="Border">
-            <Setter Property="CornerRadius" Value="16" />
+            <Setter Property="CornerRadius" Value="0" />
             <Setter Property="Padding" Value="16" />
             <Setter Property="Margin" Value="0,0,0,14" />
             <Setter Property="Background" Value="{DynamicResource GlassSurfaceBrush}" />
@@ -39,7 +39,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd" CornerRadius="10" Background="{TemplateBinding Background}"
+                        <Border x:Name="bd" CornerRadius="0" Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}" />
                         </Border>

@@ -4,7 +4,7 @@
         Title="FineClipboard"
         Width="440" Height="560"
         WindowStyle="None" ResizeMode="NoResize"
-        AllowsTransparency="True" Background="Transparent"
+        Background="{DynamicResource PopupBackground}"
         ShowInTaskbar="False" Topmost="True"
         WindowStartupLocation="Manual"
         TextOptions.TextFormattingMode="Display"
@@ -22,19 +22,20 @@
                 <MenuItem Header="转为小写" Click="MenuLower_Click" />
             </MenuItem>
             <Separator />
-            <MenuItem Tag="movelist" Header="移到列表" />
             <MenuItem Tag="copy" Header="复制(放回剪贴板)" Click="MenuCopy_Click" />
             <MenuItem Tag="openurl" Header="用浏览器打开链接" Click="MenuOpenUrl_Click" />
             <MenuItem Tag="locate" Header="在资源管理器中定位" Click="MenuLocate_Click" />
             <MenuItem Tag="saveimage" Header="图片另存为…" Click="MenuSaveImage_Click" />
             <Separator />
-            <MenuItem Tag="pin" Header="置顶 / 取消置顶" Click="MenuPin_Click" />
+            <MenuItem Tag="favorite" Header="收藏 / 取消收藏" Click="MenuFavorite_Click" />
             <MenuItem Tag="delete" Header="删除" Click="MenuDelete_Click" />
+            <Separator />
+            <MenuItem Header="清空历史(保留收藏)" Click="MenuClearHistory_Click" />
         </ContextMenu>
     </Window.Resources>
 
-    <Border CornerRadius="20" Background="{DynamicResource PopupBackground}"
-            BorderBrush="{DynamicResource GlassBorderBrush}" BorderThickness="1">
+    <Border CornerRadius="0" Background="{DynamicResource PopupBackground}"
+            BorderBrush="{DynamicResource GlassBorderBrush}" BorderThickness="0">
         <Border.Effect>
             <DropShadowEffect BlurRadius="30" ShadowDepth="0" Opacity="0.24" Color="#00142A" />
         </Border.Effect>
@@ -48,7 +49,7 @@
             </Grid.RowDefinitions>
 
             <!-- Search box -->
-            <Border Grid.Row="0" CornerRadius="13" Background="{DynamicResource SurfaceBackground}" Padding="12,8" Margin="2,2,2,10"
+            <Border Grid.Row="0" CornerRadius="0" Background="{DynamicResource SurfaceBackground}" Padding="12,8" Margin="2,2,2,10"
                     BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                 <Grid>
                     <TextBlock x:Name="SearchPlaceholder" Text="搜索剪贴板历史…"
@@ -78,7 +79,7 @@
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="ListBoxItem">
-                                    <Border x:Name="pill" CornerRadius="12" Padding="12,5" Background="#00000000">
+                                    <Border x:Name="pill" CornerRadius="0" Padding="12,5" Background="#00000000">
                                         <ContentPresenter HorizontalAlignment="Center" />
                                     </Border>
                                     <ControlTemplate.Triggers>
@@ -99,8 +100,7 @@
                 <ListBoxItem>文本</ListBoxItem>
                 <ListBoxItem>图片</ListBoxItem>
                 <ListBoxItem>文件</ListBoxItem>
-                <ListBoxItem>置顶</ListBoxItem>
-                <ListBoxItem>片段</ListBoxItem>
+                <ListBoxItem>收藏</ListBoxItem>
                 <ListBoxItem>密码</ListBoxItem>
             </ListBox>
 
@@ -120,9 +120,9 @@
                             <Setter Property="ContextMenu" Value="{StaticResource ItemMenu}" />
                             <EventSetter Event="PreviewMouseRightButtonDown" Handler="ListBoxItem_RightDown" />
                             <Setter Property="Template">
-                                <Setter.Value>
-                                    <ControlTemplate TargetType="ListBoxItem">
-                                        <Border x:Name="bd" CornerRadius="13" Background="{DynamicResource SurfaceBackground}" Padding="10,8"
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                        <Border x:Name="bd" CornerRadius="0" Background="{DynamicResource SurfaceBackground}" Padding="10,8"
                                                 BorderBrush="{DynamicResource GlassBorderSubtleBrush}" BorderThickness="1">
                                             <ContentPresenter />
                                         </Border>
@@ -143,21 +143,21 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
-                                <Border Grid.Column="0" Width="18" Height="18" CornerRadius="5"
+                                <Border Grid.Column="0" Width="18" Height="18" CornerRadius="0"
                                         Background="{DynamicResource AccentBrush}" Margin="0,0,8,0"
                                         VerticalAlignment="Center" Visibility="{Binding BadgeVisibility}">
                                     <TextBlock Text="{Binding Badge}" Foreground="White" FontSize="11"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
 
-                                <Border Grid.Column="1" Width="38" Height="38" CornerRadius="10"
+                                <Border Grid.Column="1" Width="38" Height="38" CornerRadius="0"
                                         Background="{DynamicResource AccentBrush}" Margin="0,0,10,0" ClipToBounds="True">
                                     <Grid>
                                         <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
@@ -172,7 +172,7 @@
                                            VerticalAlignment="Center" Foreground="{DynamicResource TextPrimary}" FontSize="13" />
 
                                 <StackPanel Grid.Column="3" VerticalAlignment="Top" Margin="8,1,0,0">
-                                    <TextBlock Text="📌" FontSize="10" Visibility="{Binding PinVisibility}"
+                                    <TextBlock Text="★" FontSize="10" Visibility="{Binding PinVisibility}"
                                                HorizontalAlignment="Right" />
                                     <TextBlock Text="{Binding TimeText}" Foreground="{DynamicResource TextSecondary}"
                                                FontSize="11" Visibility="{Binding TimeVisibility}" />

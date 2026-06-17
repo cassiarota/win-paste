@@ -171,6 +171,11 @@ public partial class App : Application
 
     private void ShowBalloon(string title, string text)
     {
+        if (_trayIcon != null)
+        {
+            _tray.Icon = _trayIcon;
+        }
+        _tray.BalloonTipIcon = System.Windows.Forms.ToolTipIcon.None;
         _tray.BalloonTipTitle = title;
         _tray.BalloonTipText = text;
         _tray.ShowBalloonTip(5000);
@@ -236,7 +241,7 @@ public partial class App : Application
     }
 
     /// <summary>Re-registers global hotkeys and returns whether editable hotkeys registered successfully.</summary>
-    internal (bool popupOk, bool plainOk) ReloadHotkeys()
+    internal (bool popupOk, bool plainOk, bool shotOk) ReloadHotkeys()
     {
         _hotkeys.UnregisterAll();
         HotkeyCombo popup = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyPopupKey), DefaultPopup);
@@ -244,8 +249,8 @@ public partial class App : Application
         HotkeyCombo shot = HotkeyCombo.Parse(_store.GetSetting(HistoryStore.HotkeyShotKey), DefaultShot);
         bool popupOk = _hotkeys.Register(HotkeyPopup, popup.Modifiers, popup.VirtualKey);
         bool plainOk = _hotkeys.Register(HotkeyPlain, plain.Modifiers, plain.VirtualKey);
-        _hotkeys.Register(HotkeyShot, shot.Modifiers, shot.VirtualKey);
-        return (popupOk, plainOk);
+        bool shotOk = _hotkeys.Register(HotkeyShot, shot.Modifiers, shot.VirtualKey);
+        return (popupOk, plainOk, shotOk);
     }
 
     /// <summary>Temporarily removes the global hotkeys (so the settings recorder can capture them).</summary>
@@ -260,12 +265,27 @@ public partial class App : Application
     /// </summary>
     internal bool TrySetHotkey(bool isPopup, HotkeyCombo combo)
     {
-        string key = isPopup ? HistoryStore.HotkeyPopupKey : HistoryStore.HotkeyPlainKey;
-        string previous = _store.GetSetting(key) ?? (isPopup ? DefaultPopup : DefaultPlain).Serialize();
+        return TrySetHotkey(isPopup ? "popup" : "plain", combo);
+    }
+
+    /// <summary>
+    /// Saves a new combo for one hotkey and re-registers all global shortcuts. If any then fails
+    /// to register (e.g. the combo is taken), reverts the edited shortcut and returns false.
+    /// </summary>
+    internal bool TrySetHotkey(string target, HotkeyCombo combo)
+    {
+        (string key, HotkeyCombo def) = target switch
+        {
+            "popup" => (HistoryStore.HotkeyPopupKey, DefaultPopup),
+            "plain" => (HistoryStore.HotkeyPlainKey, DefaultPlain),
+            "shot" => (HistoryStore.HotkeyShotKey, DefaultShot),
+            _ => throw new ArgumentOutOfRangeException(nameof(target), target, null),
+        };
+        string previous = _store.GetSetting(key) ?? def.Serialize();
 
         _store.SetSetting(key, combo.Serialize());
-        (bool popupOk, bool plainOk) = ReloadHotkeys();
-        if (popupOk && plainOk)
+        (bool popupOk, bool plainOk, bool shotOk) = ReloadHotkeys();
+        if (popupOk && plainOk && shotOk)
         {
             return true;
         }
@@ -420,6 +440,7 @@ public partial class App : Application
             Icon = _trayIcon,
             Visible = true,
             Text = "FineClipboard",
+            BalloonTipIcon = System.Windows.Forms.ToolTipIcon.None,
         };
         _tray.DoubleClick += (_, _) => ShowPopup();
         _tray.BalloonTipClicked += (_, _) =>

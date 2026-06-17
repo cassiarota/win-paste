@@ -5,8 +5,10 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using FineClipboard.Models;
@@ -19,9 +21,9 @@ public partial class PopupWindow : Window
     private readonly HistoryStore _store;
     private readonly App _app;
     private List<PopupItemVm> _clip = new();
-    private List<PopupItemVm> _snippets = new();
     private List<PopupItemVm> _passwords = new();
     private Point _dragStart;
+    private bool _dragCandidate;
     private bool _contextMenuOpen;
     private bool _suppressHide;
     private bool _initialized;
@@ -43,14 +45,10 @@ public partial class PopupWindow : Window
         _initialized = true;
     }
 
-    // Fixed tabs: 全部 / 文本 / 图片 / 文件 / 置顶 / 片段 / 密码. User lists are appended after these.
-    private const int FixedTabCount = 7;
-
-    /// <summary>Reloads history + snippets and resets to the "全部" tab.</summary>
+    /// <summary>Reloads history and resets to the "全部" tab.</summary>
     public void LoadItems()
     {
         LoadData();
-        RefreshTabs();
         FilterTabs.SelectedIndex = 0;
         ApplyFilter();
     }
@@ -58,20 +56,7 @@ public partial class PopupWindow : Window
     private void LoadData()
     {
         _clip = _store.GetAll(200).Select(i => new PopupItemVm(i)).ToList();
-        _snippets = _store.GetSnippets().Select(s => new PopupItemVm(s)).ToList();
         _passwords = _app.Vault.GetEntries().Select(p => new PopupItemVm(p)).ToList();
-    }
-
-    private void RefreshTabs()
-    {
-        while (FilterTabs.Items.Count > FixedTabCount)
-        {
-            FilterTabs.Items.RemoveAt(FilterTabs.Items.Count - 1);
-        }
-        foreach (ClipList list in _store.GetLists())
-        {
-            FilterTabs.Items.Add(new ListBoxItem { Content = list.Name, Tag = list.Id });
-        }
     }
 
     public void FocusSearch()
@@ -105,8 +90,7 @@ public partial class PopupWindow : Window
         }
     }
 
-    private bool SnippetTab => FilterTabs.SelectedIndex == 5;
-    private bool PasswordTab => FilterTabs.SelectedIndex == 6;
+    private bool PasswordTab => FilterTabs.SelectedIndex == 5;
 
     private void ApplyFilter()
     {
@@ -117,27 +101,13 @@ public partial class PopupWindow : Window
 
         string query = SearchBox.Text;
         IEnumerable<PopupItemVm> source;
-        bool listTab = FilterTabs.SelectedItem is ListBoxItem { Tag: long };
-
-        if (listTab)
+        if (PasswordTab)
         {
-            long listId = (long)((ListBoxItem)FilterTabs.SelectedItem).Tag;
-            source = _store.GetByList(listId).Select(i => new PopupItemVm(i));
+            source = _passwords;
             if (!string.IsNullOrWhiteSpace(query))
             {
                 source = source.Where(v =>
-                    v.PreviewText.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    (v.Item?.Text?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
-            }
-        }
-        else if (SnippetTab || PasswordTab)
-        {
-            source = PasswordTab ? _passwords : _snippets;
-            if (!string.IsNullOrWhiteSpace(query))
-            {
-                source = source.Where(v =>
-                    v.PreviewText.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    (v.Snippet?.Text.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
+                    v.PreviewText.Contains(query, StringComparison.OrdinalIgnoreCase));
             }
         }
         else
@@ -174,10 +144,8 @@ public partial class PopupWindow : Window
         SearchPlaceholder.Visibility = string.IsNullOrEmpty(query) ? Visibility.Visible : Visibility.Collapsed;
         EmptyHint.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyHint.Text = !string.IsNullOrEmpty(query) ? "没有匹配的内容"
-            : listTab ? "这个列表还没有内容,右键历史条目可「移到列表」"
-            : SnippetTab ? "还没有常用片段,可在「设置 → 常用片段」里添加"
             : PasswordTab ? (_app.Vault.IsConfigured
-                ? "还没有密码,可在「设置 → 密码管理」里添加"
+                ? "还没有密码"
                 : "请先在「设置 → 密码保护」里设置主密码")
             : "还没有历史记录,复制点东西试试";
     }
@@ -224,10 +192,6 @@ public partial class PopupWindow : Window
                 DeleteSelected();
                 e.Handled = true;
                 break;
-            case Key.P when ctrl:
-                PinSelected();
-                e.Handled = true;
-                break;
         }
     }
 
@@ -254,12 +218,18 @@ public partial class PopupWindow : Window
     private void ItemsList_MouseDoubleClick(object sender, MouseButtonEventArgs e) => PasteSelected(plainText: false);
 
     // ---- Drag out to other apps ----
-    private void ItemsList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
+    private void ItemsList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
         _dragStart = e.GetPosition(null);
+        _dragCandidate = e.OriginalSource is DependencyObject source
+            && FindAncestor<ScrollBar>(source) == null
+            && FindAncestor<Thumb>(source) == null
+            && FindAncestor<ListBoxItem>(source) != null;
+    }
 
     private void ItemsList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed)
+        if (!_dragCandidate || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
         }
@@ -294,6 +264,7 @@ public partial class PopupWindow : Window
         {
             Hide();
         }
+        _dragCandidate = false;
     }
 
     private static DataObject? BuildDragData(PopupItemVm vm)
@@ -440,8 +411,8 @@ public partial class PopupWindow : Window
         }
     }
 
-    // ---- Pin / delete ----
-    private void PinSelected()
+    // ---- Favorite / delete ----
+    private void FavoriteSelected()
     {
         if (ItemsList.SelectedItem is PopupItemVm vm && vm.Item != null)
         {
@@ -461,10 +432,6 @@ public partial class PopupWindow : Window
         if (vm.IsPassword)
         {
             _app.Vault.DeleteEntry(vm.Password!.Id);
-        }
-        else if (vm.IsSnippet)
-        {
-            _store.DeleteSnippet(vm.Snippet!.Id);
         }
         else if (vm.Item != null)
         {
@@ -508,66 +475,14 @@ public partial class PopupWindow : Window
                 "pasteplain" => Vis(type == ClipItemType.Text || type == ClipItemType.Files),
                 "edit" => Vis(isText),
                 "transform" => Vis(isText),
-                "movelist" => Vis(isClip),
                 "copy" => Vis(isClip),
                 "openurl" => Vis(isText && LooksLikeUrl(vm?.PasteText)),
                 "locate" => Vis(type == ClipItemType.Files),
                 "saveimage" => Vis(type == ClipItemType.Image),
-                "pin" => Vis(isClip),
+                "favorite" => Vis(isClip),
                 "delete" => Vis(vm != null),
                 _ => mi.Visibility,
             };
-            if (tag == "movelist" && isClip)
-            {
-                PopulateMoveList(mi, vm!.Item!);
-            }
-        }
-    }
-
-    private void PopulateMoveList(MenuItem parent, ClipboardItem item)
-    {
-        parent.Items.Clear();
-        foreach (ClipList list in _store.GetLists())
-        {
-            long listId = list.Id;
-            var sub = new MenuItem { Header = list.Name };
-            sub.Click += (_, _) => AssignTo(item, listId);
-            parent.Items.Add(sub);
-        }
-        parent.Items.Add(new Separator());
-        var create = new MenuItem { Header = "新建并加入…" };
-        create.Click += (_, _) => CreateListAndAssign(item);
-        parent.Items.Add(create);
-        var remove = new MenuItem { Header = "移出列表" };
-        remove.Click += (_, _) => AssignTo(item, null);
-        parent.Items.Add(remove);
-    }
-
-    private void AssignTo(ClipboardItem item, long? listId)
-    {
-        _store.AssignToList(item.Id, listId);
-        LoadData();
-        ApplyFilter();
-    }
-
-    private void CreateListAndAssign(ClipboardItem item)
-    {
-        _suppressHide = true;
-        try
-        {
-            var dialog = new InputDialog("新建列表", "列表名称:") { Owner = this };
-            if (dialog.ShowDialog() == true && dialog.Text.Length > 0)
-            {
-                long id = _store.AddList(dialog.Text);
-                _store.AssignToList(item.Id, id);
-                RefreshTabs();
-                LoadData();
-                ApplyFilter();
-            }
-        }
-        finally
-        {
-            _suppressHide = false;
         }
     }
 
@@ -589,8 +504,20 @@ public partial class PopupWindow : Window
 
     private void MenuPaste_Click(object sender, RoutedEventArgs e) => PasteSelected(plainText: false);
     private void MenuPastePlain_Click(object sender, RoutedEventArgs e) => PasteSelected(plainText: true);
-    private void MenuPin_Click(object sender, RoutedEventArgs e) => PinSelected();
+    private void MenuFavorite_Click(object sender, RoutedEventArgs e) => FavoriteSelected();
     private void MenuDelete_Click(object sender, RoutedEventArgs e) => DeleteSelected();
+
+    private void MenuClearHistory_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show("确定清空历史吗? 收藏项会保留。", "FineClipboard",
+                MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+        {
+            return;
+        }
+        _store.Clear(keepPinned: true);
+        LoadData();
+        ApplyFilter();
+    }
 
     private void MenuCopy_Click(object sender, RoutedEventArgs e)
     {
@@ -690,5 +617,18 @@ public partial class PopupWindow : Window
         {
             // best effort
         }
+    }
+
+    private static T? FindAncestor<T>(DependencyObject current) where T : DependencyObject
+    {
+        while (current != null)
+        {
+            if (current is T match)
+            {
+                return match;
+            }
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
     }
 }

@@ -9,6 +9,7 @@ protocol AppControl: AnyObject {
     func suspendHotkeys()
     func resumeHotkeys()
     func trySetHotkey(popup: Bool, combo: HotkeyCombo) -> Bool
+    func trySetHotkey(target: String, combo: HotkeyCombo) -> Bool
     func applyAppearance(_ tag: String)
     var isRecordingPaused: Bool { get }
     func setRecordingPaused(_ paused: Bool)

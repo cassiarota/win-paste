@@ -31,6 +31,10 @@ public sealed class UpdateService
         "https://api.github.com/repos/cassiarota/fine-clipboard/releases/latest";
     private const string LatestReleasePage =
         "https://github.com/cassiarota/fine-clipboard/releases/latest";
+    private const string VpsVersionFile =
+        "https://cassiangroup.uk/fineclipboard/download/version.txt";
+    private const string VpsWindowsInstaller =
+        "https://cassiangroup.uk/fineclipboard/download/FineClipboard-Setup.exe";
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
@@ -45,7 +49,7 @@ public sealed class UpdateService
             using HttpResponseMessage response = await Http.SendAsync(request).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                return UpdateCheckResult.Failed;
+                return await CheckVpsAsync().ConfigureAwait(false);
             }
 
             string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
@@ -57,7 +61,7 @@ public sealed class UpdateService
             Version? latest = ParseVersion(tag);
             if (latest == null)
             {
-                return UpdateCheckResult.Failed; // couldn't read the release version
+                return await CheckVpsAsync().ConfigureAwait(false);
             }
 
             Version current = Normalize(Assembly.GetExecutingAssembly().GetName().Version);
@@ -67,6 +71,36 @@ public sealed class UpdateService
                 return UpdateCheckResult.Available(new UpdateInfo(tag, download));
             }
             return UpdateCheckResult.UpToDate;
+        }
+        catch
+        {
+            return await CheckVpsAsync().ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<UpdateCheckResult> CheckVpsAsync()
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, VpsVersionFile);
+            request.Headers.UserAgent.ParseAdd("FineClipboard-UpdateCheck");
+            using HttpResponseMessage response = await Http.SendAsync(request).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return UpdateCheckResult.Failed;
+            }
+
+            string versionText = (await response.Content.ReadAsStringAsync().ConfigureAwait(false)).Trim();
+            Version? latest = ParseVersion(versionText);
+            if (latest == null)
+            {
+                return UpdateCheckResult.Failed;
+            }
+
+            Version current = Normalize(Assembly.GetExecutingAssembly().GetName().Version);
+            return latest > current
+                ? UpdateCheckResult.Available(new UpdateInfo($"v{latest}", VpsWindowsInstaller))
+                : UpdateCheckResult.UpToDate;
         }
         catch
         {
