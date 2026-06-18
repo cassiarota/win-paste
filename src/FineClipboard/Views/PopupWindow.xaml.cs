@@ -28,6 +28,9 @@ public partial class PopupWindow : Window
     private bool _suppressHide;
     private bool _initialized;
 
+    // Fixed tabs: 全部 / 文本 / 图片 / 文件 / 收藏 / 密码. User lists follow them.
+    private const int FixedTabCount = 6;
+
     public PopupWindow(HistoryStore store, App app)
     {
         InitializeComponent();
@@ -49,6 +52,7 @@ public partial class PopupWindow : Window
     public void LoadItems()
     {
         LoadData();
+        RefreshTabs();
         FilterTabs.SelectedIndex = 0;
         ApplyFilter();
     }
@@ -57,6 +61,18 @@ public partial class PopupWindow : Window
     {
         _clip = _store.GetAll(200).Select(i => new PopupItemVm(i)).ToList();
         _passwords = _app.Vault.GetEntries().Select(p => new PopupItemVm(p)).ToList();
+    }
+
+    private void RefreshTabs()
+    {
+        while (FilterTabs.Items.Count > FixedTabCount)
+        {
+            FilterTabs.Items.RemoveAt(FilterTabs.Items.Count - 1);
+        }
+        foreach (ClipList list in _store.GetLists())
+        {
+            FilterTabs.Items.Add(new ListBoxItem { Content = list.Name, Tag = list.Id });
+        }
     }
 
     public void FocusSearch()
@@ -101,7 +117,19 @@ public partial class PopupWindow : Window
 
         string query = SearchBox.Text;
         IEnumerable<PopupItemVm> source;
-        if (PasswordTab)
+        bool listTab = FilterTabs.SelectedItem is ListBoxItem { Tag: long };
+        if (listTab)
+        {
+            long listId = (long)((ListBoxItem)FilterTabs.SelectedItem).Tag;
+            source = _store.GetByList(listId).Select(i => new PopupItemVm(i));
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                source = source.Where(v =>
+                    v.PreviewText.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                    (v.Item?.Text?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+        }
+        else if (PasswordTab)
         {
             source = _passwords;
             if (!string.IsNullOrWhiteSpace(query))
@@ -144,6 +172,7 @@ public partial class PopupWindow : Window
         SearchPlaceholder.Visibility = string.IsNullOrEmpty(query) ? Visibility.Visible : Visibility.Collapsed;
         EmptyHint.Visibility = list.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyHint.Text = !string.IsNullOrEmpty(query) ? "没有匹配的内容"
+            : listTab ? "这个列表还没有内容，右键历史条目可移到列表"
             : PasswordTab ? (_app.Vault.IsConfigured
                 ? "还没有密码"
                 : "请先在「设置 → 密码保护」里设置主密码")
@@ -454,6 +483,69 @@ public partial class PopupWindow : Window
         }
     }
 
+    private void FilterTab_RightDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is ListBoxItem item)
+        {
+            item.IsSelected = true;
+        }
+    }
+
+    private void ListTabMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        _contextMenuOpen = true;
+        if (((ContextMenu)sender).Items.OfType<MenuItem>().FirstOrDefault(item => Equals(item.Tag, "delete-list")) is { } delete)
+        {
+            delete.Visibility = FilterTabs.SelectedItem is ListBoxItem { Tag: long }
+                ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private void NewList_Click(object sender, RoutedEventArgs e)
+    {
+        _suppressHide = true;
+        try
+        {
+            var dialog = new InputDialog("新建列表", "列表名称:") { Owner = this };
+            if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(dialog.Text))
+            {
+                long id = _store.AddList(dialog.Text.Trim());
+                RefreshTabs();
+                FilterTabs.SelectedItem = FilterTabs.Items.Cast<object>()
+                    .OfType<ListBoxItem>().FirstOrDefault(item => item.Tag is long value && value == id);
+            }
+        }
+        finally
+        {
+            _suppressHide = false;
+        }
+    }
+
+    private void DeleteList_Click(object sender, RoutedEventArgs e)
+    {
+        if (FilterTabs.SelectedItem is not ListBoxItem { Tag: long id } tab)
+        {
+            return;
+        }
+        _suppressHide = true;
+        try
+        {
+            if (MessageBox.Show($"确定删除列表“{tab.Content}”吗？列表中的项目会回到全部历史。", "FineClipboard",
+                    MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            {
+                return;
+            }
+            _store.DeleteList(id);
+            RefreshTabs();
+            FilterTabs.SelectedIndex = 0;
+            ApplyFilter();
+        }
+        finally
+        {
+            _suppressHide = false;
+        }
+    }
+
     private void ItemMenu_Opened(object sender, RoutedEventArgs e)
     {
         _contextMenuOpen = true;
@@ -475,6 +567,7 @@ public partial class PopupWindow : Window
                 "pasteplain" => Vis(type == ClipItemType.Text || type == ClipItemType.Files),
                 "edit" => Vis(isText),
                 "transform" => Vis(isText),
+                "movelist" => Vis(isClip),
                 "copy" => Vis(isClip),
                 "openurl" => Vis(isText && LooksLikeUrl(vm?.PasteText)),
                 "locate" => Vis(type == ClipItemType.Files),
@@ -483,6 +576,57 @@ public partial class PopupWindow : Window
                 "delete" => Vis(vm != null),
                 _ => mi.Visibility,
             };
+            if (tag == "movelist" && isClip)
+            {
+                PopulateMoveList(mi, vm!.Item!);
+            }
+        }
+    }
+
+    private void PopulateMoveList(MenuItem parent, ClipboardItem item)
+    {
+        parent.Items.Clear();
+        foreach (ClipList list in _store.GetLists())
+        {
+            long listId = list.Id;
+            var entry = new MenuItem { Header = list.Name };
+            entry.Click += (_, _) => AssignToList(item, listId);
+            parent.Items.Add(entry);
+        }
+        parent.Items.Add(new Separator());
+        var create = new MenuItem { Header = "新建列表并加入…" };
+        create.Click += (_, _) => CreateListAndAssign(item);
+        parent.Items.Add(create);
+        var remove = new MenuItem { Header = "移出列表" };
+        remove.Click += (_, _) => AssignToList(item, null);
+        parent.Items.Add(remove);
+    }
+
+    private void AssignToList(ClipboardItem item, long? listId)
+    {
+        _store.AssignToList(item.Id, listId);
+        LoadData();
+        ApplyFilter();
+    }
+
+    private void CreateListAndAssign(ClipboardItem item)
+    {
+        _suppressHide = true;
+        try
+        {
+            var dialog = new InputDialog("新建列表", "列表名称:") { Owner = this };
+            if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(dialog.Text))
+            {
+                long id = _store.AddList(dialog.Text.Trim());
+                _store.AssignToList(item.Id, id);
+                RefreshTabs();
+                LoadData();
+                ApplyFilter();
+            }
+        }
+        finally
+        {
+            _suppressHide = false;
         }
     }
 
@@ -506,18 +650,6 @@ public partial class PopupWindow : Window
     private void MenuPastePlain_Click(object sender, RoutedEventArgs e) => PasteSelected(plainText: true);
     private void MenuFavorite_Click(object sender, RoutedEventArgs e) => FavoriteSelected();
     private void MenuDelete_Click(object sender, RoutedEventArgs e) => DeleteSelected();
-
-    private void MenuClearHistory_Click(object sender, RoutedEventArgs e)
-    {
-        if (MessageBox.Show("确定清空历史吗? 收藏项会保留。", "FineClipboard",
-                MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
-        {
-            return;
-        }
-        _store.Clear(keepPinned: true);
-        LoadData();
-        ApplyFilter();
-    }
 
     private void MenuCopy_Click(object sender, RoutedEventArgs e)
     {

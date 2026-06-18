@@ -61,8 +61,7 @@ final class SettingsModel: ObservableObject {
 
 struct SettingsView: View {
     let host: AppControl
-    let onMasterPassword: () -> Void
-    let masterTitle: () -> String
+    let onSetPassword: () -> Void
     @StateObject var model: SettingsModel
 
     @State private var startup = false
@@ -74,25 +73,29 @@ struct SettingsView: View {
     @State private var popupSize = "medium"
     @State private var exclusions = ""
     @State private var count = 0
+    @State private var selectedTab = 0
+    @State private var passwordConfigured = false
 
     private var store: Store { host.store }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                header
-
-                section("通用") {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            TabView(selection: $selectedTab) {
+                tabPage {
                     Toggle("开机自启动", isOn: $startup)
                         .onChange(of: startup) { LoginItem.setEnabled($0) }
                     Toggle("复制时播放提示音", isOn: $sound)
                         .onChange(of: sound) { store.setSetting(Store.soundEnabledKey, $0 ? "1" : "0") }
                 }
+                .tabItem { Label("通用", systemImage: "gearshape") }
+                .tag(0)
 
-                section("历史与隐私") {
+                tabPage {
                     Toggle("暂停记录(隐私模式)", isOn: $paused)
                         .onChange(of: paused) { host.setRecordingPaused($0) }
-                    labeled("最多保留(非收藏记录)") {
+                    HStack {
+                        Text("最多保留(非收藏记录)").frame(width: 190, alignment: .leading)
                         Picker("", selection: $maxItems) {
                             Text("200 条").tag("200"); Text("500 条").tag("500")
                             Text("1000 条").tag("1000"); Text("5000 条").tag("5000")
@@ -101,7 +104,8 @@ struct SettingsView: View {
                         .frame(width: 150)
                         .onChange(of: maxItems) { store.setSetting(Store.maxItemsKey, $0) }
                     }
-                    labeled("历史过期时间") {
+                    HStack {
+                        Text("历史过期时间").frame(width: 190, alignment: .leading)
                         Picker("", selection: $expiry) {
                             Text("永不过期").tag("0"); Text("1 天").tag("1"); Text("7 天").tag("7")
                             Text("30 天").tag("30"); Text("90 天").tag("90")
@@ -120,7 +124,7 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                     TextEditor(text: $exclusions)
                         .font(.system(size: 12))
-                        .frame(height: 72)
+                        .frame(height: 108)
                         .scrollContentBackground(.hidden)
                         .background(.white.opacity(0.14))
                         .onChange(of: exclusions) { store.setSetting(Store.exclusionsKey, $0) }
@@ -128,8 +132,10 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+                .tabItem { Label("历史与隐私", systemImage: "clock.arrow.circlepath") }
+                .tag(1)
 
-                section("外观") {
+                tabPage {
                     HStack(spacing: 18) {
                         labeled("主题") {
                             Picker("", selection: $theme) {
@@ -149,52 +155,63 @@ struct SettingsView: View {
                         }
                     }
                 }
+                .tabItem { Label("外观", systemImage: "paintbrush") }
+                .tag(2)
 
-                section("快捷键") {
+                tabPage {
                     Text("点击按钮后按下新的组合键(需含修饰键),Esc 取消。")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                         GridRow {
-                            Text("打开剪贴板历史")
+                            Text("打开剪贴板历史").frame(width: 200, alignment: .leading)
                             Button(model.label(for: "popup")) { model.startRecording("popup") }.frame(width: 170)
                         }
                         GridRow {
-                            Text("纯文本粘贴最近一条")
+                            Text("纯文本粘贴最近一条").frame(width: 200, alignment: .leading)
                             Button(model.label(for: "plain")) { model.startRecording("plain") }.frame(width: 170)
                         }
                         GridRow {
-                            Text("截图")
+                            Text("截图").frame(width: 200, alignment: .leading)
                             Button(model.label(for: "shot")) { model.startRecording("shot") }.frame(width: 170)
                         }
                     }
                 }
+                .tabItem { Label("快捷键", systemImage: "keyboard") }
+                .tag(3)
 
-                section("同步") {
+                tabPage {
                     Text("云同步使用同步口令端到端加密；密码数据不会参与同步。")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Button("打开云同步设置…") { host.showSyncSettings() }
                 }
+                .tabItem { Label("同步", systemImage: "arrow.triangle.2.circlepath") }
+                .tag(4)
 
-                section("密码") {
-                    Text("主密码用于加密本机密码库；锁定后查看 / 粘贴密码需重新输入。")
+                tabPage {
+                    Text("设置主密码后即可使用加密密码库。")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    HStack {
-                        Button(masterTitle(), action: onMasterPassword)
+                    if passwordConfigured {
+                        Text("密码已设置")
+                    } else {
+                        Button("设置密码") {
+                            onSetPassword()
+                            passwordConfigured = host.vault.isConfigured
+                        }
                     }
                 }
-
-                Text("提示:首次使用需在「系统设置 → 隐私与安全性 → 辅助功能」中允许 FineClipboard,才能自动粘贴。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                .tabItem { Label("密码", systemImage: "lock") }
+                .tag(5)
             }
-            .padding(20)
+            .frame(height: 430)
         }
+        .padding(20)
         .background(.regularMaterial)
-        .frame(width: 480)
+        .frame(width: 560)
         .onAppear(perform: load)
+        .onDisappear { model.cancel() }
     }
 
     private var header: some View {
@@ -223,18 +240,16 @@ struct SettingsView: View {
         popupSize = store.setting(Store.popupSizeKey) ?? "medium"
         exclusions = store.setting(Store.exclusionsKey) ?? ""
         count = store.count()
+        passwordConfigured = host.vault.isConfigured
         model.loadLabels()
     }
 
-    private func section<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
+    private func tabPage<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
             content()
         }
-        .padding(14)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial)
-        .overlay(Rectangle().stroke(.white.opacity(0.18)))
     }
 
     private func labeled<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {

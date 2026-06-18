@@ -23,6 +23,7 @@ enum TextTransform: String, CaseIterable {
 /// A tab in the popup. "pinned" is kept as the storage field, but shown as favorites.
 enum PopupTab: Hashable {
     case all, text, image, files, pinned, passwords
+    case list(Int64)
 
     var title: String {
         switch self {
@@ -32,6 +33,7 @@ enum PopupTab: Hashable {
         case .files: return "文件"
         case .pinned: return "收藏"
         case .passwords: return "密码"
+        case .list: return "列表"
         }
     }
 }
@@ -58,7 +60,10 @@ protocol PopupHost: AnyObject {
     func pastePassword(_ entry: PasswordEntry)
     func setPinned(_ item: ClipItem, _ pinned: Bool)
     func delete(item: ClipItem)
-    func clearHistoryKeepingFavorites()
+    func moveToList(item: ClipItem, listId: Int64?)
+    func newListAndAdd(item: ClipItem)
+    func createList()
+    func deleteList(_ list: ClipList)
     func editAndPaste(item: ClipItem)
     func transformAndPaste(item: ClipItem, transform: TextTransform)
     func openLink(item: ClipItem)
@@ -74,6 +79,7 @@ final class PopupModel: ObservableObject {
     @Published var selected = 0
     @Published var search = "" { didSet { applyFilter() } }
     @Published var tab: PopupTab = .all
+    @Published var lists: [ClipList] = []
 
     let store: Store
     let vault: Vault
@@ -82,9 +88,11 @@ final class PopupModel: ObservableObject {
     init(store: Store, vault: Vault) {
         self.store = store
         self.vault = vault
+        lists = store.lists()
     }
 
     func reload() {
+        lists = store.lists()
         applyFilter()
     }
 
@@ -131,6 +139,7 @@ final class PopupModel: ObservableObject {
         case .image: return store.itemsByKind(.image, limit: cap())
         case .files: return store.itemsByKind(.files, limit: cap())
         case .pinned: return store.pinnedItems()
+        case .list(let id): return store.itemsByList(id)
         default: return []
         }
     }
@@ -142,6 +151,7 @@ final class PopupModel: ObservableObject {
         case .image: return items.filter { $0.kind == .image }
         case .files: return items.filter { $0.kind == .files }
         case .pinned: return items.filter { $0.pinned }
+        case .list(let id): return items.filter { $0.listId == id }
         default: return items
         }
     }

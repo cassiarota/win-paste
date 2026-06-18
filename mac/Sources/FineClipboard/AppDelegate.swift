@@ -137,7 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
     private func pasteRecentPlain() {
         previousApp = NSWorkspace.shared.frontmostApplication
         if let item = store.mostRecentText(), let text = item.text {
-            pasteText(text)
+            pasteText(text, waitForShortcutRelease: true)
             store.touch(item.id)
         }
     }
@@ -193,14 +193,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
 
     private func hidePopup() { popup.hide() }
 
-    private func activateAndPaste() {
+    private func activateAndPaste(waitForShortcutRelease: Bool = false) {
         let trusted = Paste.ensureAccessibility(prompt: true)
         let prev = previousApp
         DispatchQueue.main.async {
             prev?.activate()
             if trusted {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { Paste.sendCmdV() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                    if waitForShortcutRelease { self?.sendPasteWhenModifiersReleased() }
+                    else { Paste.sendCmdV() }
+                }
             }
+        }
+    }
+
+    private func sendPasteWhenModifiersReleased(retries: Int = 150) {
+        let modifiers: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
+        let held = !CGEventSource.flagsState(.combinedSessionState).intersection(modifiers).isEmpty
+        if !held || retries == 0 {
+            Paste.sendCmdV()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
+            self?.sendPasteWhenModifiersReleased(retries: retries - 1)
         }
     }
 
@@ -212,11 +227,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         activateAndPaste()
     }
 
-    private func pasteText(_ text: String) {
+    private func pasteText(_ text: String, waitForShortcutRelease: Bool = false) {
         hidePopup()
         monitor.suppress()
         Paste.writeText(text)
-        activateAndPaste()
+        activateAndPaste(waitForShortcutRelease: waitForShortcutRelease)
     }
 
     func pasteSnippet(_ s: Snippet) { pasteText(s.content) }
@@ -249,6 +264,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         let id = store.addList(name: name)
         store.assignToList(item.id, listId: id)
         popup.model.reload()
+    }
+
+    func createList() {
+        guard let name = Prompt.text("新建列表", "列表名称")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else { return }
+        let id = store.addList(name: name)
+        popup.model.reload()
+        popup.model.select(tab: .list(id))
+    }
+
+    func deleteList(_ list: ClipList) {
+        guard Prompt.confirm("确定删除列表“\(list.name)”吗？", "列表中的项目会回到全部历史。") else { return }
+        store.deleteList(list.id)
+        popup.model.reload()
+        popup.model.select(tab: .all)
     }
 
     func editAndPaste(item: ClipItem) {
@@ -326,6 +356,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         shotItem.submenu = shotMenu
         menu.addItem(shotItem)
 
+        let clearHistory = NSMenuItem(title: "清空剪贴板历史…", action: #selector(clearHistoryAction), keyEquivalent: "")
+        clearHistory.target = self
+        menu.addItem(clearHistory)
+
         updateItem = NSMenuItem(title: "检查更新…", action: #selector(checkUpdateAction), keyEquivalent: "")
         updateItem.target = self
         menu.addItem(updateItem)
@@ -376,6 +410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
     @objc private func shotRegionAction() { captureScreenshot(.region) }
     @objc private func shotWindowAction() { captureScreenshot(.window) }
     @objc private func shotFullAction() { captureScreenshot(.fullscreen) }
+    @objc private func clearHistoryAction() { clearHistoryKeepingFavorites() }
 
     private func captureScreenshot(_ mode: Screenshot.Mode) {
         pendingScreenshotPreview = true
@@ -407,10 +442,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         if settingsWC == nil {
             let view = SettingsView(
                 host: self,
-                onMasterPassword: { [weak self] in self?.setOrChangeMaster() },
-                masterTitle: { [weak self] in (self?.vault.isConfigured ?? false) ? "修改主密码…" : "设置主密码…" },
+                onSetPassword: { [weak self] in self?.setMasterPassword() },
                 model: SettingsModel(host: self))
-            settingsWC = WindowFactory.make(title: "FineClipboard 设置", width: 480, height: 640, root: view)
+            settingsWC = WindowFactory.make(title: "FineClipboard 设置", width: 560, height: 540, root: view)
         }
         activate(settingsWC)
     }
@@ -431,18 +465,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func setOrChangeMaster() {
-        if vault.isConfigured {
-            guard let v = Prompt.secureFields("修改主密码", ["当前主密码", "新主密码", "确认新主密码"]) else { return }
-            guard !v[1].isEmpty, v[1] == v[2] else { Prompt.info("两次输入的新密码不一致或为空"); return }
-            if vault.changeMasterPassword(old: v[0], new: v[1]) { Prompt.info("主密码已更新") }
-            else { Prompt.info("当前主密码不正确") }
-        } else {
-            guard let v = Prompt.secureFields("设置主密码", ["主密码", "确认主密码"]) else { return }
-            guard !v[0].isEmpty, v[0] == v[1] else { Prompt.info("两次输入不一致或为空"); return }
-            vault.setMasterPassword(v[0])
-            Prompt.info("主密码已设置", "请牢记主密码,忘记将无法找回已保存的密码。")
-        }
+    private func setMasterPassword() {
+        guard !vault.isConfigured else { return }
+        guard let v = Prompt.secureFields("设置主密码", ["主密码", "确认主密码"]) else { return }
+        guard !v[0].isEmpty, v[0] == v[1] else { Prompt.info("两次输入不一致或为空"); return }
+        vault.setMasterPassword(v[0])
+        Prompt.info("主密码已设置", "请牢记主密码,忘记将无法找回已保存的密码。")
     }
 
     // MARK: - first run

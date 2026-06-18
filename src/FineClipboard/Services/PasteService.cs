@@ -51,10 +51,21 @@ public sealed class PasteService
         // No popup was shown, so the foreground window is still the user's target.
         _monitor.SuppressFor(600);
         SetText(item.Text);
-        await Task.Delay(50).ConfigureAwait(true);
+        await WaitForShortcutReleaseAsync().ConfigureAwait(true);
 
         NativeMethods.SendCtrlV();
         _store.Touch(item.Id);
+    }
+
+    private static async Task WaitForShortcutReleaseAsync()
+    {
+        // The plain-paste hotkey defaults to Ctrl+Shift+B. If Shift is still physically down
+        // when Ctrl+V is injected, Windows sees Ctrl+Shift+V and opens the history popup again.
+        for (int attempt = 0; attempt < 150 && NativeMethods.AreShortcutModifiersPressed(); attempt++)
+        {
+            await Task.Delay(10).ConfigureAwait(true);
+        }
+        await Task.Delay(20).ConfigureAwait(true);
     }
 
     /// <summary>Puts an item on the clipboard without pasting (and bumps it to the top).</summary>

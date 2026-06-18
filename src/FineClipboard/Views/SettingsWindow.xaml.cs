@@ -40,7 +40,7 @@ public partial class SettingsWindow : Window
         SelectByTag(MaxItemsCombo, _store.GetSetting(HistoryStore.MaxItemsKey) ?? "1000");
         SelectByTag(ThemeCombo, _store.GetSetting(HistoryStore.ThemeKey) ?? "system");
         SelectByTag(PopupSizeCombo, _store.GetSetting(HistoryStore.PopupSizeKey) ?? "medium");
-        MasterPwButton.Content = _app.Vault.IsConfigured ? "修改主密码…" : "设置主密码…";
+        RefreshPasswordState();
         LoadHotkeyDisplay();
         RefreshCount();
         _initializing = false;
@@ -234,11 +234,22 @@ public partial class SettingsWindow : Window
     // ---- Password protection ----
     private void MasterPw_Click(object sender, RoutedEventArgs e)
     {
+        if (_app.Vault.IsConfigured)
+        {
+            return;
+        }
         var window = new SetMasterPasswordWindow(_app.Vault) { Owner = this };
         if (window.ShowDialog() == true)
         {
-            MasterPwButton.Content = "修改主密码…";
+            RefreshPasswordState();
         }
+    }
+
+    private void RefreshPasswordState()
+    {
+        bool configured = _app.Vault.IsConfigured;
+        MasterPwButton.Visibility = configured ? Visibility.Collapsed : Visibility.Visible;
+        PasswordConfiguredText.Visibility = configured ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void SaveTag(ComboBox combo, string settingKey)

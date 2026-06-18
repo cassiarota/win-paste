@@ -11,7 +11,7 @@
     <AssemblyName>FineClipboard</AssemblyName>
     <RootNamespace>FineClipboard</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.12.1</Version>
+    <Version>0.12.2</Version>
     <Product>FineClipboard</Product>
     <!-- WPF-primary app: PerMonitorV2 DPI is intentionally set in app.manifest.
          WinForms (used only for the tray icon) would otherwise warn about it. -->

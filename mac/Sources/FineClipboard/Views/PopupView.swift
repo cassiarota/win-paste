@@ -6,10 +6,12 @@ struct PopupView: View {
     @FocusState private var searchFocused: Bool
 
     private var tabs: [(tab: PopupTab, title: String)] {
-        [
+        var values: [(PopupTab, String)] = [
             (.all, "全部"), (.text, "文本"), (.image, "图片"), (.files, "文件"),
             (.pinned, "收藏"), (.passwords, "密码"),
         ]
+        values.append(contentsOf: model.lists.map { (.list($0.id), $0.name) })
+        return values
     }
 
     var body: some View {
@@ -37,6 +39,13 @@ struct PopupView: View {
                             .background(isSel ? Color.accentColor.opacity(0.88) : Color.secondary.opacity(0.12))
                             .foregroundColor(isSel ? .white : .primary)
                             .onTapGesture { model.select(tab: entry.tab) }
+                            .contextMenu {
+                                Button("新建列表…") { model.host?.createList() }
+                                if case .list(let id) = entry.tab,
+                                   let list = model.lists.first(where: { $0.id == id }) {
+                                    Button("删除当前列表…") { model.host?.deleteList(list) }
+                                }
+                            }
                     }
                 }
                 .padding(.horizontal, 10).padding(.vertical, 6)
@@ -163,9 +172,15 @@ struct PopupView: View {
             }
             Divider()
             Button(item.pinned ? "取消收藏" : "收藏") { model.host?.setPinned(item, !item.pinned) }
+            Menu("移到列表") {
+                Button("移出列表") { model.host?.moveToList(item: item, listId: nil) }
+                ForEach(model.lists) { list in
+                    Button(list.name) { model.host?.moveToList(item: item, listId: list.id) }
+                }
+                Divider()
+                Button("新建列表并加入…") { model.host?.newListAndAdd(item: item) }
+            }
             Button("删除") { model.host?.delete(item: item) }
-            Divider()
-            Button("清空历史(保留收藏)") { model.host?.clearHistoryKeepingFavorites() }
         } else if let p = row.password {
             Button("粘贴(需主密码)") { model.host?.pastePassword(p) }
         }

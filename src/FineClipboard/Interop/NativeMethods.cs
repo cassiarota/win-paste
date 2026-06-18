@@ -23,6 +23,9 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool AddClipboardFormatListener(IntPtr hwnd);
 
@@ -104,6 +107,10 @@ internal static class NativeMethods
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_KEYUP = 0x0002;
     private const ushort VK_CONTROL = 0x11;
+    private const int VK_SHIFT = 0x10;
+    private const int VK_MENU = 0x12;
+    private const int VK_LWIN = 0x5B;
+    private const int VK_RWIN = 0x5C;
     private const ushort VK_V = 0x56;
     private const int SW_RESTORE = 9;
 
@@ -119,6 +126,13 @@ internal static class NativeMethods
         };
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
     }
+
+    /// <summary>True while a physical modifier from the triggering global shortcut is still held.</summary>
+    public static bool AreShortcutModifiersPressed() =>
+        IsKeyPressed(VK_CONTROL) || IsKeyPressed(VK_SHIFT) || IsKeyPressed(VK_MENU) ||
+        IsKeyPressed(VK_LWIN) || IsKeyPressed(VK_RWIN);
+
+    private static bool IsKeyPressed(int virtualKey) => (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
 
     private static INPUT Key(ushort vk, bool up) => new()
     {

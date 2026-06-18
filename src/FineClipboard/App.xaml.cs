@@ -464,6 +464,8 @@ public partial class App : Application
         shotMenu.DropDownItems.Add("全屏截图", null, (_, _) => CaptureFullscreenScreenshot());
         menu.Items.Add(shotMenu);
 
+        menu.Items.Add("清空剪贴板历史…", null, (_, _) => ClearHistoryFromTray());
+
         _updateMenuItem = new System.Windows.Forms.ToolStripMenuItem("检查更新…", null, (_, _) => OnUpdateMenuClick());
         menu.Items.Add(_updateMenuItem);
 
@@ -471,6 +473,17 @@ public partial class App : Application
         menu.Items.Add("退出", null, (_, _) => Shutdown());
 
         _tray.ContextMenuStrip = menu;
+    }
+
+    private void ClearHistoryFromTray()
+    {
+        if (MessageBox.Show("确定清空剪贴板历史吗？收藏项会保留。", "FineClipboard",
+                MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+        {
+            return;
+        }
+        _store.Clear(keepPinned: true);
+        _popup?.LoadItems();
     }
 
     private sealed class TrayMenuRenderer : System.Windows.Forms.ToolStripProfessionalRenderer
