@@ -333,7 +333,7 @@ public partial class App : Application
     {
         _pendingScreenshotPreview = true;
         _pendingScreenshotPreviewUntil = DateTime.UtcNow.AddMinutes(2);
-        ScreenshotService.CaptureInteractive();
+        ScreenshotService.CaptureInteractive(() => _pendingScreenshotPreview = false);
     }
 
     internal void CaptureFullscreenScreenshot()

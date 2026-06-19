@@ -4,6 +4,7 @@ import AppKit
 struct PopupView: View {
     @ObservedObject var model: PopupModel
     @FocusState private var searchFocused: Bool
+    @State private var pageScrollPending = false
 
     private var tabs: [(tab: PopupTab, title: String)] {
         var values: [(PopupTab, String)] = [
@@ -64,8 +65,19 @@ struct PopupView: View {
                             }
                         }
                     }
+                    .background(PageWheelCapture { direction, visibleRows in
+                        let previous = model.selected
+                        pageScrollPending = true
+                        model.move(direction * visibleRows)
+                        if model.selected == previous { pageScrollPending = false }
+                    })
                     .onChange(of: model.selected) { sel in
-                        withAnimation(.linear(duration: 0.08)) { proxy.scrollTo(sel, anchor: .center) }
+                        if pageScrollPending {
+                            pageScrollPending = false
+                            proxy.scrollTo(sel, anchor: .top)
+                        } else {
+                            withAnimation(.linear(duration: 0.08)) { proxy.scrollTo(sel, anchor: .center) }
+                        }
                     }
                 }
             }
@@ -189,5 +201,51 @@ struct PopupView: View {
     private func looksLikeURL(_ s: String?) -> Bool {
         guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
         return s.hasPrefix("http://") || s.hasPrefix("https://")
+    }
+}
+
+/// Consumes the system line-count/speed setting and turns each physical wheel event into one
+/// contiguous viewport. Precision trackpads advance once per gesture rather than once per frame.
+private struct PageWheelCapture: NSViewRepresentable {
+    let onPage: (Int, Int) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPage: onPage) }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.view = view
+        context.coordinator.install()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onPage = onPage
+    }
+
+    final class Coordinator {
+        weak var view: NSView?
+        var onPage: (Int, Int) -> Void
+        private var monitor: Any?
+
+        init(onPage: @escaping (Int, Int) -> Void) { self.onPage = onPage }
+        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+
+        func install() {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self, let view = self.view, event.window === view.window else { return event }
+                let local = view.convert(event.locationInWindow, from: nil)
+                guard view.bounds.contains(local) else { return event }
+
+                if event.hasPreciseScrollingDeltas && event.phase != .began && !event.phase.isEmpty {
+                    return nil
+                }
+                let delta = event.scrollingDeltaY
+                guard abs(delta) > 0.01 else { return nil }
+                let direction = delta < 0 ? 1 : -1
+                let visibleRows = max(1, Int(view.bounds.height / 52))
+                self.onPage(direction, visibleRows)
+                return nil
+            }
+        }
     }
 }

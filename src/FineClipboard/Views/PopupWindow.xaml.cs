@@ -256,6 +256,30 @@ public partial class PopupWindow : Window
             && FindAncestor<ListBoxItem>(source) != null;
     }
 
+    /// <summary>
+    /// WPF multiplies wheel input by the Windows "lines per notch" preference.  That makes a
+    /// fast wheel or a high line-count setting skip several screens.  The clipboard is a
+    /// paged surface instead: every wheel notch advances exactly one adjacent viewport.
+    /// </summary>
+    private void ItemsList_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        ScrollViewer? viewer = FindVisualChild<ScrollViewer>(ItemsList);
+        if (viewer == null || viewer.ScrollableHeight <= 0)
+        {
+            return;
+        }
+
+        double direction = e.Delta < 0 ? 1 : -1;
+        double page = Math.Max(1, viewer.ViewportHeight);
+        // One input event is one adjacent page. System line-count/screen-count settings and
+        // unusually large wheel deltas are deliberately ignored.
+        viewer.ScrollToVerticalOffset(Math.Clamp(
+            viewer.VerticalOffset + direction * page,
+            0,
+            viewer.ScrollableHeight));
+        e.Handled = true;
+    }
+
     private void ItemsList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (!_dragCandidate || e.LeftButton != MouseButtonState.Pressed)
@@ -760,6 +784,24 @@ public partial class PopupWindow : Window
                 return match;
             }
             current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match)
+            {
+                return match;
+            }
+            T? nested = FindVisualChild<T>(child);
+            if (nested != null)
+            {
+                return nested;
+            }
         }
         return null;
     }

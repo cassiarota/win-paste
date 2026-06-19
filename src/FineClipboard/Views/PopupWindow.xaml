@@ -116,6 +116,7 @@
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          HorizontalContentAlignment="Stretch"
                          MouseDoubleClick="ItemsList_MouseDoubleClick"
+                         PreviewMouseWheel="ItemsList_PreviewMouseWheel"
                          PreviewMouseLeftButtonDown="ItemsList_PreviewMouseLeftButtonDown"
                          PreviewMouseMove="ItemsList_PreviewMouseMove">
                     <ListBox.ItemContainerStyle>

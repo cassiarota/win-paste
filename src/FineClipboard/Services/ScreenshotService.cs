@@ -1,33 +1,27 @@
-using System.Diagnostics;
+using System;
+using FineClipboard.Views;
 
 namespace FineClipboard.Services;
 
 /// <summary>
-/// Screen capture. The interactive mode opens the built-in Snip overlay (ms-screenclip),
-/// which supports rectangle, magnetic-window, and fullscreen selection and copies the result
-/// to the clipboard. Fullscreen is also available directly (all monitors). Either way the
+/// Screen capture. The interactive mode uses FineClipboard's pixel-accurate overlay with
+/// window/screen snapping, crosshairs, magnifier, coordinates and RGB sampling. Either way the
 /// captured image lands on the clipboard and flows into history like any copy — so it is
 /// OCR'd and can be saved to a file via the image right-click menu.
 /// </summary>
 public static class ScreenshotService
 {
-    /// <summary>Opens the system Snip overlay (rectangle / window / fullscreen → clipboard).</summary>
-    public static void CaptureInteractive()
+    /// <summary>Opens the FineClipboard smart-selection overlay.</summary>
+    public static void CaptureInteractive(Action? canceled = null)
     {
         try
         {
-            Process.Start(new ProcessStartInfo("ms-screenclip:") { UseShellExecute = true });
+            new ScreenshotCaptureWindow(canceled).Show();
         }
         catch
         {
-            try
-            {
-                Process.Start(new ProcessStartInfo("snippingtool.exe") { UseShellExecute = true });
-            }
-            catch
-            {
-                // No snip tool available — nothing to do.
-            }
+            // A secure desktop or unavailable screen can prevent capture.
+            canceled?.Invoke();
         }
     }
 

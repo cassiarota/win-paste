@@ -415,7 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PopupHost, AppControl 
     private func captureScreenshot(_ mode: Screenshot.Mode) {
         pendingScreenshotPreview = true
         pendingScreenshotPreviewUntil = Date().addingTimeInterval(120)
-        Screenshot.capture(mode)
+        Screenshot.capture(mode) { [weak self] in self?.pendingScreenshotPreview = false }
     }
 
     @objc private func checkUpdateAction() {
